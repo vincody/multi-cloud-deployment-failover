@@ -5,7 +5,7 @@
 | Giai đoạn | Trạng thái | Mục tiêu |
 |---|---|---|
 | [GĐ1](GIAI_DOAN_01_UNG_DUNG_LOCAL.md) | Hoàn thành | Ứng dụng demo, API health/status, metrics và test local |
-| [GĐ2](GIAI_DOAN_02_IMAGE_VA_CI.md) | Sẵn sàng thực hiện | Build một image Linux AMD64, đẩy GHCR theo commit digest |
+| [GĐ2](GIAI_DOAN_02_IMAGE_VA_CI.md) | Hoàn thành | Build một image Linux AMD64, đẩy GHCR theo commit digest |
 | [GĐ3](GIAI_DOAN_03_AWS.md) | Chưa bắt đầu | Deploy image lên AWS EC2 |
 | [GĐ4](GIAI_DOAN_04_AZURE.md) | Chưa bắt đầu | Deploy cùng image lên Azure Container Apps |
 | [GĐ5](GIAI_DOAN_05_DOMAIN_VA_HTTPS.md) | Chưa bắt đầu | Một domain chung và HTTPS ở cả hai origin |

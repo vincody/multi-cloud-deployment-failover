@@ -4,7 +4,7 @@ Repository scaffold for project #29: the same service will run on AWS as the pri
 
 ## Current state
 
-Phase 1 is complete locally: it contains a read-only dashboard, health/status APIs, sample lab-equipment data, Prometheus metrics, automated API tests, and a Dockerfile prepared for the next stage. No cloud resources have been created.
+Phase 1 is complete. Phase 2 adds a reproducible Linux AMD64 image and GitHub Actions pipeline that tests the app, publishes commit-tagged images to GHCR, and records the immutable digest. No cloud resources have been created.
 
 ## Planned layout
 

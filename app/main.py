@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import subprocess
 import threading
 import time
 from datetime import datetime, timezone
@@ -24,8 +25,34 @@ STARTED_MONOTONIC = time.monotonic()
 
 APP_ENV = os.getenv("APP_ENV", "local")
 APP_REGION = os.getenv("APP_REGION", "local-development")
-APP_VERSION = os.getenv("APP_VERSION", "dev")
-COMMIT_SHA = os.getenv("COMMIT_SHA", "unknown")
+APP_VERSION = os.getenv("APP_VERSION", "v0.1.0")
+
+
+def _local_commit_sha() -> str:
+    """Return the checked-out Git revision for local development only."""
+    try:
+        revision = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=APP_DIR.parent,
+            capture_output=True,
+            check=True,
+            text=True,
+            timeout=1,
+        ).stdout.strip()
+        dirty = subprocess.run(
+            ["git", "diff", "--quiet"],
+            cwd=APP_DIR.parent,
+            capture_output=True,
+            check=False,
+            timeout=1,
+        ).returncode != 0
+    except (OSError, subprocess.SubprocessError):
+        return "not-built"
+
+    return f"{revision}-dirty" if dirty else revision
+
+
+COMMIT_SHA = os.getenv("COMMIT_SHA") or _local_commit_sha()
 
 HTTP_REQUESTS = Counter(
     "dcs29_http_requests_total",

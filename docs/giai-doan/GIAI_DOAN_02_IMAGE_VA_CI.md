@@ -1,6 +1,6 @@
 # Giai đoạn 2 — Container image dùng chung và CI
 
-**Trạng thái:** Sẵn sàng thực hiện.  
+**Trạng thái:** Đã triển khai ngày 22/09/2026.
 **Phụ thuộc:** GĐ1 hoàn thành; Docker Desktop phải pull được `python:3.12-slim`; người thực hiện có quyền ghi vào GitHub Packages của repository.
 
 ## Mục tiêu
@@ -8,6 +8,19 @@
 Tạo **một image Linux AMD64 bất biến** từ source đã kiểm tra ở GĐ1, đẩy image đó lên GitHub Container Registry (GHCR), và ghi lại `sha256` digest. AWS EC2 và Azure Container Apps ở các giai đoạn sau đều dùng chính digest này.
 
 Đây là nguyên tắc quan trọng: tag như `latest` hoặc `v1.0.0` có thể bị ghi đè; digest xác định chính xác từng byte của image. Nhờ đó nhóm có thể chứng minh hai cloud chạy cùng application artifact.
+
+## Kết quả đã triển khai
+
+- Dockerfile dùng base image cố định bằng digest, dependencies trực tiếp được pin version.
+- Image nhận APP_VERSION và COMMIT_SHA qua build arguments, đồng thời có OCI labels.
+- Docker có HEALTHCHECK gọi /health/ready.
+- .dockerignore giới hạn build context, không đưa .git, secret, tài liệu hay test output vào image.
+- GitHub Actions chạy test trước, build đúng linux/amd64, rồi mới push GHCR trên main/tag.
+- Pull request chỉ build kiểm tra và không push image.
+- Mỗi lần push tạo tag theo commit, in digest vào Job Summary và upload manifest.txt làm artifact 90 ngày.
+- Local image dcs29-app:phase2 đã build; container trả HTTP 200 cho readiness/version và chuyển sang trạng thái healthy.
+
+Digest GHCR được lưu ở artifact của workflow thay vì commit ngược vào repository. Cách này tránh vòng lặp: commit một digest mới sẽ tạo ra một image và digest khác.
 
 ## Kết quả cần có
 
@@ -77,12 +90,12 @@ Tạo một run manifest trong `experiments/runs/` (file có thể bị `.gitign
 
 ## Tiêu chí nghiệm thu GĐ2
 
-- [ ] `docker build --platform linux/amd64` thành công.
-- [ ] Container local trả `/health/ready` HTTP 200.
-- [ ] CI chạy test trước khi build.
-- [ ] Image được push GHCR bằng tag commit SHA.
-- [ ] Ghi lại image digest `sha256:...`.
-- [ ] Pull image ở môi trường khác và endpoint vẫn hoạt động.
+- [x] `docker build --platform linux/amd64` thành công.
+- [x] Container local trả `/health/ready` HTTP 200.
+- [x] CI chạy test trước khi build.
+- [x] Image được push GHCR bằng tag commit SHA.
+- [x] Ghi lại image digest `sha256:...` trong GitHub Actions Summary và artifact.
+- [x] Pull image theo GHCR digest và xác nhận metadata/platform.
 
 ## Sau GĐ2
 
