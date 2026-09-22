@@ -36,6 +36,8 @@ jobs:
   container:
     needs: test
     runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -102,3 +104,36 @@ jobs:
           name: image-identity-${{ github.sha }}
           path: image-identity/manifest.txt
           retention-days: 90
+
+  verify-published-image:
+    if: github.event_name != 'pull_request'
+    needs: container
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull immutable image and verify runtime
+        shell: bash
+        env:
+          IMAGE_DIGEST: ${{ needs.container.outputs.digest }}
+        run: |
+          image_ref="${IMAGE_NAME}@${IMAGE_DIGEST}"
+          docker pull "${image_ref}"
+          docker run --detach --name dcs29-ci-verify --publish 18080:8080 --env APP_ENV=ci-clean-pull --env APP_REGION=github-actions "${image_ref}"
+          for attempt in {1..15}; do
+            if curl --fail --silent http://127.0.0.1:18080/health/ready; then
+              break
+            fi
+            sleep 2
+          done
+          curl --fail --show-error http://127.0.0.1:18080/version
+          docker inspect dcs29-ci-verify --format 'image={{.Image}} status={{.State.Status}}'
+          docker stop dcs29-ci-verify

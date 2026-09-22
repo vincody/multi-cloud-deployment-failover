@@ -18,6 +18,7 @@ Tạo **một image Linux AMD64 bất biến** từ source đã kiểm tra ở G
 - GitHub Actions chạy test trước, build đúng linux/amd64, rồi mới push GHCR trên main/tag.
 - Pull request chỉ build kiểm tra và không push image.
 - Mỗi lần push tạo tag theo commit, in digest vào Job Summary và upload manifest.txt làm artifact 90 ngày.
+- Một CI job trên runner sạch đăng nhập với quyền packages:read, pull đúng digest và gọi health/version.
 - Local image dcs29-app:phase2 đã build; container trả HTTP 200 cho readiness/version và chuyển sang trạng thái healthy.
 
 Digest GHCR được lưu ở artifact của workflow thay vì commit ngược vào repository. Cách này tránh vòng lặp: commit một digest mới sẽ tạo ra một image và digest khác.
@@ -87,6 +88,8 @@ docker buildx imagetools inspect ghcr.io/vincody/multi-cloud-deployment-failover
 ```
 
 Tạo một run manifest trong `experiments/runs/` (file có thể bị `.gitignore`; chỉ commit bản mẫu đã xóa thông tin nhạy cảm) bao gồm: UTC time, commit, image name, digest, platform, người build và kết quả test.
+
+Lưu ý xác thực local: credential Git hiện tại của máy push source được nhưng thiếu scope read:packages, nên không dùng nó làm bằng chứng pull GHCR. Workflow dùng GITHUB_TOKEN với quyền tối thiểu packages:read trong một job sạch để xác minh artifact đã publish.
 
 ## Tiêu chí nghiệm thu GĐ2
 
