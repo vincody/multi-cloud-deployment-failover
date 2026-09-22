@@ -1,0 +1,8 @@
+[
+  {"id": "LAB-001", "name": "Workstation 01", "type": "Desktop", "status": "available", "location": "Lab A"},
+  {"id": "LAB-002", "name": "Workstation 02", "type": "Desktop", "status": "in_use", "location": "Lab A"},
+  {"id": "LAB-003", "name": "Network Switch 01", "type": "Network", "status": "available", "location": "Lab B"},
+  {"id": "LAB-004", "name": "Projector 01", "type": "Display", "status": "maintenance", "location": "Lab B"},
+  {"id": "LAB-005", "name": "Raspberry Pi Cluster", "type": "Compute", "status": "available", "location": "Lab C"},
+  {"id": "LAB-006", "name": "Storage Node 01", "type": "Storage", "status": "available", "location": "Lab C"}
+]

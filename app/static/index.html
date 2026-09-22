@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="DCS29 multi-cloud failover service status dashboard" />
+    <title>DCS29 · Multi-Cloud Service Status</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero" aria-labelledby="page-title">
+        <div>
+          <p class="eyebrow">DCS29 / DISTRIBUTED COMPUTING SYSTEMS</p>
+          <h1 id="page-title">Multi-Cloud Service Status</h1>
+          <p class="subtitle">Trạng thái runtime của workload dùng để kiểm thử AWS ↔ Azure failover.</p>
+        </div>
+        <div class="actions">
+          <button id="refresh-button" type="button">Refresh now</button>
+          <p id="refresh-description" class="refresh-note">Auto refresh mỗi 3 giây</p>
+        </div>
+      </header>
+
+      <section class="status-banner" aria-label="Service health">
+        <span class="status-dot" aria-hidden="true"></span>
+        <div>
+          <p class="label">Service health</p>
+          <p id="health-status" class="health-value" aria-live="polite">Loading status…</p>
+        </div>
+        <p id="last-updated" class="last-updated" aria-live="polite">Chưa nhận response</p>
+      </section>
+
+      <section class="metric-grid" aria-label="Runtime details">
+        <article class="metric-card emphasis">
+          <p class="label">Serving environment</p>
+          <p id="environment" class="metric-value">—</p>
+          <p id="region" class="metric-detail">—</p>
+        </article>
+        <article class="metric-card">
+          <p class="label">Application version</p>
+          <p id="version" class="metric-value mono">—</p>
+          <p id="commit" class="metric-detail mono">—</p>
+        </article>
+        <article class="metric-card">
+          <p class="label">API response time</p>
+          <p id="response-time" class="metric-value">—</p>
+          <p class="metric-detail">/api/status</p>
+        </article>
+        <article class="metric-card">
+          <p class="label">Instance uptime</p>
+          <p id="uptime" class="metric-value">—</p>
+          <p id="started-at" class="metric-detail">—</p>
+        </article>
+        <article class="metric-card">
+          <p class="label">Requests handled</p>
+          <p id="request-count" class="metric-value">—</p>
+          <p class="metric-detail">Từ khi instance khởi động</p>
+        </article>
+        <article class="metric-card">
+          <p class="label">Dataset fingerprint</p>
+          <p id="dataset-hash" class="metric-value compact mono">—</p>
+          <p class="metric-detail">Phải giống nhau ở AWS và Azure</p>
+        </article>
+      </section>
+
+      <section class="details" aria-labelledby="devices-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">DEMO WORKLOAD</p>
+            <h2 id="devices-title">Lab equipment catalogue</h2>
+          </div>
+          <p id="device-summary" class="device-summary">Loading catalogue…</p>
+        </div>
+        <div class="table-wrapper" tabindex="0">
+          <table>
+            <thead>
+              <tr><th>ID</th><th>Thiết bị</th><th>Loại</th><th>Vị trí</th><th>Trạng thái</th></tr>
+            </thead>
+            <tbody id="device-list"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="verification" aria-labelledby="verification-title">
+        <div>
+          <p class="eyebrow">FAILOVER VERIFICATION</p>
+          <h2 id="verification-title">Điều cần quan sát trong buổi demo</h2>
+        </div>
+        <ol>
+          <li>Dashboard trả <code>aws-primary</code> khi AWS đang healthy.</li>
+          <li>Sau khi môi trường AWS ngừng phục vụ, request mới qua domain chung trả <code>azure-standby</code>.</li>
+          <li>Dataset fingerprint và version không đổi qua lần chuyển môi trường.</li>
+        </ol>
+      </section>
+    </main>
+    <script src="/app.js" defer></script>
+  </body>
+</html>
