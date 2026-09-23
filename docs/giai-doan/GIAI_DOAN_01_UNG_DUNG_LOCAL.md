@@ -1,67 +1,71 @@
-# Giai đoạn 1 — Ứng dụng local
+# Giai đoạn 1 — Xây dựng và kiểm tra ứng dụng local
 
 **Trạng thái:** Hoàn thành ngày 22/09/2026.
+**Phạm vi:** ứng dụng, UI, API, dữ liệu mẫu, metrics và kiểm thử local; chưa tạo tài nguyên cloud.
 
-## Mục tiêu
+## 1. Mục tiêu và phạm vi đã chốt
 
-Tạo workload nhỏ nhưng đủ thật để chứng minh failover sau này: website chỉ đọc danh sách thiết bị phòng lab, có thể nhận biết instance đang phục vụ và có các endpoint để DNS, monitoring và load test sử dụng.
+GĐ1 tạo workload đủ nhỏ cho đồ án nhưng đủ tín hiệu để chứng minh failover. Sản phẩm là website read-only tra cứu thiết bị phòng lab, không phải bản sao Google Docs/Figma và chưa phải hệ thống quản lý thiết bị hoàn chỉnh.
 
-Không làm CRUD, đăng nhập hay database ở giai đoạn này. Nếu website phụ thuộc database đặt riêng tại AWS, Azure sẽ không thể thực sự tiếp quản khi AWS mất; vì vậy dataset mẫu được đóng gói trong image ở cả hai cloud.
+Bản đầu không có đăng nhập, CRUD hay database. Dataset được đóng gói cùng ứng dụng để AWS và Azure có thể phục vụ độc lập. Giới hạn phải ghi trong báo cáo: hệ thống chứng minh failover tầng phục vụ cho workload read-only, chưa chứng minh RPO/RTO cho giao dịch ghi.
 
-## Đã làm những gì
+## 2. Thành phần thực tế đã tạo
 
-| Hạng mục | Vị trí | Ý nghĩa đối với đề tài |
+| Thành phần | File | Vai trò |
 |---|---|---|
-| FastAPI service | `app/main.py` | Một backend nhẹ, chạy cùng ứng dụng ở AWS/Azure |
-| Dashboard read-only | `app/static/` | Thể hiện trực quan cloud đang phục vụ, version, uptime, latency và dữ liệu |
-| Dataset 6 thiết bị | `app/data/devices.json` | Workload nghiệp vụ giả lập, giống hệt ở hai cloud |
-| Health endpoints | `/health/live`, `/health/ready` | Tách process còn sống với khả năng sẵn sàng trả dữ liệu |
-| Runtime identity | `/api/status`, `/version` | Chứng minh request hiện tại đang do `aws-primary` hay `azure-standby` xử lý |
-| Prometheus metrics | `/metrics` | Cung cấp request counter và latency histogram cho GĐ7 |
-| Automated API tests | `tests/test_api.py` | Giữ các hành vi quan trọng không bị hỏng khi nâng cấp |
-| Dockerfile | `Dockerfile` | Chuẩn bị đóng gói cùng một runtime cho GĐ2 |
+| FastAPI backend | `app/main.py` | API, health, runtime identity, metrics, static UI |
+| Dashboard | `app/static/` | Hiển thị origin, version, latency, uptime và thiết bị |
+| Dataset | `app/data/devices.json` | 6 thiết bị giả lập dùng giống nhau ở mọi môi trường |
+| Automated tests | `tests/test_api.py` | Kiểm tra readiness, identity, cache headers và dataset |
+| Cấu hình mẫu | `.env.example` | Mô tả biến môi trường, không chứa secret |
+| Dependencies | `requirements*.txt` | Tách runtime dependency và test dependency |
+| Container entry | `Dockerfile` | Chuẩn bị tại GĐ1, hoàn thiện và nghiệm thu ở GĐ2 |
 
-## Cách ứng dụng hoạt động
+## 3. Luồng hoạt động
 
-Khi khởi động, `app/main.py` đọc `devices.json`, tính SHA-256 và giữ fingerprint đó trong response. Khi hai cloud chạy cùng image/dataset, fingerprint phải như nhau. Đây là bằng chứng đơn giản rằng failover không đổi phiên bản hoặc dữ liệu demo.
+1. Uvicorn import `app.main`.
+2. Backend đọc `devices.json` và parse JSON.
+3. Backend tính SHA-256 trên bytes của dataset.
+4. Khi dữ liệu nạp thành công, health/readiness và API bắt đầu phục vụ.
+5. UI tại `/` gọi `/api/status` và `/api/devices` bằng URL tương đối mỗi 3 giây.
+6. Middleware đo duration, tăng request counter và gắn headers nhận diện.
+7. Prometheus đọc counter/histogram từ `/metrics`.
 
-Ứng dụng nhận diện môi trường bằng các biến:
+Nếu dataset thiếu hoặc sai JSON, app fail-fast thay vì báo readiness giả. URL tương đối giúp browser tự gọi đúng backend sau khi DNS chuyển từ AWS sang Azure.
 
-| Biến | Ví dụ ở AWS | Ví dụ ở Azure | Mục đích |
+## 4. Runtime identity
+
+| Giá trị | Local | AWS dự kiến | Azure dự kiến |
 |---|---|---|---|
-| `APP_ENV` | `aws-primary` | `azure-standby` | Hiển thị origin đang trả request |
-| `APP_REGION` | `ap-southeast-1` | `southeastasia` | Cho biết vị trí chạy |
-| `APP_VERSION` | `v1.0.0` | `v1.0.0` | So sánh release |
-| `COMMIT_SHA` | commit Git | cùng commit Git | Truy vết source/image |
+| `APP_ENV` | `local` | `aws-primary` | `azure-standby` |
+| `APP_REGION` | `local-development` | `ap-southeast-1` | Azure region đã chọn |
+| `APP_VERSION` | mặc định `v0.1.0` | lấy từ image/CI | giống AWS |
+| `COMMIT_SHA` | tự đọc Git | CI truyền full SHA | cùng SHA AWS |
+| `dataset_sha256` | tính lúc startup | cùng fingerprint | cùng fingerprint |
 
-Frontend gọi các URL tương đối như `/api/status`, không ghi cứng hostname AWS. Vì thế khi DNS chuyển sang Azure, browser tự gọi đúng API của Azure. Các response API/health có `Cache-Control: no-store`, tránh cache che mất thời điểm failover.
+Local gắn `-dirty` nếu source có thay đổi chưa commit. Trong container, CI truyền SHA vì image không chứa `.git`. Sau failover, version/commit/fingerprint phải giữ nguyên; environment/region phải thay đổi.
 
-Dashboard tự refresh mỗi 3 giây và có nút Refresh. Trạng thái chỉ hiện xanh sau khi API trả lời thành công; nếu gọi API thất bại, banner chuyển đỏ `Unavailable`. Điều này tránh một màn hình đang cached hiển thị xanh sai trong buổi demo.
+## 5. Contract endpoint
 
-## Endpoint đã có
-
-| Endpoint | Dùng cho | Kết quả mong đợi |
+| Endpoint | Dùng cho | Kết quả |
 |---|---|---|
-| `/` | Demo cho người xem | Dashboard thiết bị và runtime status |
-| `/health/live` | Liveness | HTTP 200 khi process còn chạy |
-| `/health/ready` | Readiness/health check | HTTP 200 khi dataset đã nạp |
-| `/api/status` | UI, k6, kiểm chứng failover | Environment, region, version, uptime, fingerprint |
-| `/api/devices` | Workload nghiệp vụ | Danh sách thiết bị và fingerprint |
-| `/version` | Đối chiếu release | Environment, version, commit, fingerprint |
-| `/metrics` | Prometheus | Counter request và histogram latency |
+| `GET /` | Người demo | Dashboard HTML |
+| `GET /health/live` | Liveness | 200 khi process phản hồi |
+| `GET /health/ready` | Docker/Route 53 | 200 và dataset fingerprint |
+| `GET /api/status` | UI/probe | health, env, region, version, SHA, uptime, request count |
+| `GET /api/devices` | Workload/k6 | identity, fingerprint và danh sách thiết bị |
+| `GET /version` | Kiểm tra deploy | identity tối thiểu để so hai origin |
+| `GET /metrics` | Prometheus | request counter và duration histogram |
 
-## Đã kiểm tra
+API/health/version có `Cache-Control: no-store` để cache không che sự cố. Response có `X-Served-By` và `X-App-Version`. Metric labels chỉ gồm method/path/status, không chứa request ID/device ID để tránh cardinality cao.
 
-1. Cài dependencies trong `.venv` và chạy Uvicorn cục bộ ở cổng 8080.
-2. Mở dashboard bằng browser: dữ liệu 6 thiết bị hiển thị; auto-refresh và Refresh hoạt động.
-3. Gọi trực tiếp `/api/status`: nhận HTTP 200, `Cache-Control: no-store`, `X-Served-By: local`.
-4. Kiểm tra `/health/ready` trả HTTP 200 và `/metrics` chứa metrics ứng dụng.
-5. Chạy `pytest`: **3 tests pass**. Có 2 warning deprecation từ dependency FastAPI/Starlette test client, không làm test thất bại.
-6. Chạy `compileall` cho thư mục `app/`: pass.
+## 6. UI đã làm
 
-Dockerfile đã được kiểm tra cấu trúc nhưng build image local chưa hoàn tất vì Docker Desktop của máy không phân giải được DNS tới `registry-1.docker.io` để tải base image `python:3.12-slim`. Đây là lỗi mạng/Docker Desktop của môi trường, không phải lỗi source. GĐ2 sẽ xác nhận lại sau khi Docker có Internet/DNS.
+Dashboard hiển thị service health, môi trường/region, version/commit, response time, uptime, request count, dataset fingerprint và bảng thiết bị. UI refresh 3 giây một lần. Khi API lỗi, banner chuyển `Unavailable` thay vì giữ trạng thái xanh từ lần gọi trước.
 
-## Cách chạy lại
+UI bám `DESIGN.md`: canvas near-black, surface charcoal, hairline border, lavender cho CTA/focus và màu semantic cho health. Grid responsive 3 → 2 → 1 cột; có focus-visible và reduced-motion.
+
+## 7. Cách chạy lại
 
 ```powershell
 python -m venv .venv
@@ -69,24 +73,52 @@ python -m venv .venv
 .\.venv\Scripts\python -m uvicorn app.main:app --host 127.0.0.1 --port 8080
 ```
 
-Mở `http://127.0.0.1:8080`, sau đó ở terminal khác:
+Mở `http://127.0.0.1:8080`. Ở terminal khác:
 
 ```powershell
 .\.venv\Scripts\python -m pytest -q
-Invoke-WebRequest http://127.0.0.1:8080/health/ready
-Invoke-WebRequest http://127.0.0.1:8080/metrics
+Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8080/health/ready
+Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8080/version
+Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8080/api/devices
+Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8080/metrics
 ```
 
-## Tiêu chí hoàn thành GĐ1
+## 8. Kết quả thực tế
 
-- [x] Website load được và có workload nghiệp vụ.
-- [x] Health, status, version, metrics endpoint có mặt.
-- [x] Environment/version/fingerprint được trả về để đối chiếu sau failover.
-- [x] API quan trọng không bị cache.
-- [x] Test tự động pass.
-- [x] Dockerfile sẵn sàng cho container hóa.
-- [ ] Docker image build thành công trên máy có Docker Hub DNS/Internet — chuyển sang GĐ2 để hoàn tất.
+- 3 automated tests pass.
+- Readiness trả HTTP 200 và đúng dataset SHA.
+- Status trả `environment=local`, healthy, `Cache-Control=no-store`, `X-Served-By=local`.
+- Devices trả đủ 6 ID từ `LAB-001` đến `LAB-006`.
+- Browser xác nhận auto-refresh, Refresh, bảng dữ liệu và trạng thái health hoạt động.
+- Fingerprint dataset: `40242be543f3d25dc7d07a135ef1227c1006b3e60b0cb6e6610818ecd1fbbe9d`.
+- Warning deprecation từ test client không làm test thất bại.
 
-## Bước tiếp theo
+## 9. Vấn đề đã gặp
 
-Thực hiện [Giai đoạn 2 — Image và CI](GIAI_DOAN_02_IMAGE_VA_CI.md). Kết quả đầu ra phải là một image Linux AMD64 duy nhất trên GitHub Container Registry, có immutable digest để AWS và Azure cùng deploy.
+Lần Docker build đầu không resolve được Docker Hub. Đây là lỗi mạng Docker Desktop, không phải FastAPI. Khi Docker có mạng, base image và application image đã build thành công ở GĐ2. Vì vậy source/test được nghiệm thu tại GĐ1; container/registry được nghiệm thu tại GĐ2.
+
+Trạng thái version ban đầu là `dev / commit unknown`. Đã sửa thành version `v0.1.0`, Git SHA tự phát hiện local và build args trong CI.
+
+## 10. Bằng chứng cần lưu
+
+- Source, test và screenshot dashboard.
+- Output `pytest`.
+- Response `/version`, `/health/ready` và mẫu `/metrics`.
+- Dataset fingerprint.
+- Commit hoàn thiện UI GĐ1: `e23bf00`.
+- Không lưu `.venv`, cache, `.env` thật hay token.
+
+## 11. Checklist nghiệm thu
+
+- [x] UI/API chạy local.
+- [x] Health, readiness, status, version và metrics có contract rõ.
+- [x] Runtime identity phân biệt được origin.
+- [x] Dataset ổn định và có fingerprint.
+- [x] Endpoint đo đạc không bị cache.
+- [x] Tests pass.
+- [x] UI có trạng thái lỗi và responsive.
+- [x] Source sẵn sàng đóng gói.
+
+## 12. Kết luận và hướng tiếp theo
+
+GĐ1 tạo workload quan sát được, chưa tạo multi-cloud. GĐ2 biến workload thành image bất biến và chứng minh image lấy được từ registry. Xem [GĐ2](GIAI_DOAN_02_IMAGE_VA_CI.md).
