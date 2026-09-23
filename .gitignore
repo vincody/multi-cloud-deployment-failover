@@ -3,6 +3,26 @@
 .env.*
 !.env.example
 
+# Cloud credentials, signing material, and local infrastructure state
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+id_rsa*
+id_ed25519*
+.aws/
+.azure/
+.kube/
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+*.auto.tfvars
+*.auto.tfvars.json
+
 # Python
 __pycache__/
 *.py[cod]
@@ -13,6 +33,10 @@ venv/
 .pytest_cache/
 coverage/
 *.log
+*.db
+*.sqlite
+*.sqlite3
+tmp/
 
 # Experiment output: retain a documented sample only when intentionally committed.
 experiments/runs/
