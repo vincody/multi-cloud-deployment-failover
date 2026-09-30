@@ -26,7 +26,7 @@ docs/                Project analysis and supporting documentation
 - [AWS Console deployment](docs/giai-doan/GIAI_DOAN_03_AWS_CONSOLE.md)
 - [Azure Portal deployment and verification](docs/giai-doan/GIAI_DOAN_04_AZURE_PORTAL.md)
 - [Implementation stages and current progress](docs/giai-doan/README.md)
-- [Original planning guide (contains superseded Container Apps steps)](HUONG_DAN_29_AWS_AZURE_DEPLOY_VA_KIEM_THU.md)
+- [Vietnamese deployment guide entry point](HUONG_DAN_29_AWS_AZURE_DEPLOY_VA_KIEM_THU.md)
 
 ## Run locally
 

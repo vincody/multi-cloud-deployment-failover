@@ -15,7 +15,7 @@
 | [GĐ7](GIAI_DOAN_07_OBSERVABILITY.md) | Ba probe URL của domain bạn có dữ liệu trên Grafana | Prometheus, Grafana, Blackbox Exporter |
 | [GĐ8](GIAI_DOAN_08_KIEM_THU_FAILOVER.md) | Lưu số đo/lượt thử và giải thích kết quả | k6, mô phỏng sự cố, đo và báo cáo kết quả |
 
-Kiến trúc và workflow: [sơ đồ](../../images/ARCHITECTURE.md). Thao tác triển khai: [AWS Console](GIAI_DOAN_03_AWS_CONSOLE.md) và [Azure Portal](GIAI_DOAN_04_AZURE_PORTAL.md). [Hướng dẫn tổng hợp ban đầu](../../HUONG_DAN_29_AWS_AZURE_DEPLOY_VA_KIEM_THU.md) còn các bước Azure Container Apps cũ, không dùng làm quy trình triển khai.
+Kiến trúc và workflow: [sơ đồ](../../images/ARCHITECTURE.md). Thao tác triển khai: [AWS Console](GIAI_DOAN_03_AWS_CONSOLE.md) và [Azure Portal](GIAI_DOAN_04_AZURE_PORTAL.md). [Trang hướng dẫn tổng hợp](../../HUONG_DAN_29_AWS_AZURE_DEPLOY_VA_KIEM_THU.md) dẫn về lộ trình hiện hành.
 
 Ghi chú và ảnh từ một lượt triển khai cũ trong `experiments/` chỉ là bằng chứng tham khảo; không dùng IP, region hoặc digest trong đó cho lần chạy mới.
 
