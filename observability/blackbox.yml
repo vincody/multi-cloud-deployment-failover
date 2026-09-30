@@ -1,0 +1,10 @@
+modules:
+  https_ready:
+    prober: http
+    timeout: 7s
+    http:
+      method: GET
+      valid_status_codes: [200]
+      fail_if_not_ssl: true
+      preferred_ip_protocol: ip4
+      ip_protocol_fallback: false

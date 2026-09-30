@@ -1,0 +1,31 @@
+global:
+  scrape_interval: 10s
+  scrape_timeout: 8s
+  evaluation_interval: 10s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["prometheus:9090"]
+
+  - job_name: blackbox_https
+    metrics_path: /probe
+    params:
+      module: [https_ready]
+    static_configs:
+      - targets: ["https://aws-origin.cloudfailover.id.vn/health/ready"]
+        labels:
+          target_name: aws-origin
+      - targets: ["https://azure-origin.cloudfailover.id.vn/health/ready"]
+        labels:
+          target_name: azure-origin
+      - targets: ["https://app.cloudfailover.id.vn/health/ready"]
+        labels:
+          target_name: shared-domain
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox:9115

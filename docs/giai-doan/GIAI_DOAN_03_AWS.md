@@ -3,6 +3,8 @@
 **Trạng thái:** Chưa thực hiện.
 **Mục tiêu:** tạo origin AWS độc lập chạy đúng GHCR digest của GĐ2 với `APP_ENV=aws-primary`. GĐ3 chỉ nghiệm thu origin trực tiếp; domain chung/TLS/failover thuộc GĐ5–GĐ6.
 
+**Hướng dẫn thao tác từng bước:** [AWS Console → EC2 → Docker Compose → kiểm tra nghiệm thu](GIAI_DOAN_03_AWS_CONSOLE.md).
+
 ## 1. Đầu vào bắt buộc
 
 - AWS account có quyền EC2, VPC, Security Group và Elastic IP.
@@ -24,7 +26,7 @@ Khuyến nghị Ubuntu x86_64, public subnet có route Internet Gateway, volume 
 2. Tạo Security Group:
    - TCP 22 chỉ từ IP quản trị, hoặc dùng SSM thay SSH.
    - TCP 80 từ Internet trong GĐ3.
-   - TCP 443 từ Internet để chuẩn bị GĐ5.
+   - TCP 443 chỉ mở khi cấu hình HTTPS ở GĐ5.
    - Không có inbound 8080.
 3. Tạo EC2 Ubuntu x86_64 trong public subnet.
 4. Gán Elastic IP và associate vào instance.
@@ -125,4 +127,4 @@ Không terminate instance khi chưa lưu evidence. Stop EC2 vẫn tính phí EBS
 
 ## 12. Kết quả mong đợi và bước tiếp theo
 
-Kết quả cuối GĐ3 là một AWS origin ổn định, chưa phải multi-cloud failover. Sau nghiệm thu, chuyển [GĐ4 — Azure Container Apps](GIAI_DOAN_04_AZURE.md) và dùng chính digest này.
+Kết quả cuối GĐ3 là một AWS origin ổn định, chưa phải multi-cloud failover. Sau nghiệm thu, chuyển [GĐ4 — Azure Ubuntu VM](GIAI_DOAN_04_AZURE.md) và dùng chính digest này.

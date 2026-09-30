@@ -40,3 +40,15 @@ def test_devices_match_status_dataset() -> None:
         "LAB-005",
         "LAB-006",
     }
+
+
+def test_workload_metrics_ignore_dashboard_polling() -> None:
+    before = client.get("/api/status").json()["workload_60s"]["requests"]
+    client.get("/api/status")
+    assert client.get("/api/status").json()["workload_60s"]["requests"] == before
+
+    assert client.get("/api/devices").status_code == 200
+    summary = client.get("/api/status").json()["workload_60s"]
+    assert summary["requests"] == before + 1
+    assert summary["error_percent"] == 0
+    assert summary["p95_ms"] is not None

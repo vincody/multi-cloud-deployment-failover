@@ -1,101 +1,109 @@
 const elements = {
-  healthBanner: document.querySelector(".status-banner"),
   healthStatus: document.querySelector("#health-status"),
+  healthText: document.querySelector("#health-text"),
+  cloudLabel: document.querySelector("#cloud-label"),
   environment: document.querySelector("#environment"),
   region: document.querySelector("#region"),
-  version: document.querySelector("#version"),
-  commit: document.querySelector("#commit"),
-  responseTime: document.querySelector("#response-time"),
   uptime: document.querySelector("#uptime"),
-  startedAt: document.querySelector("#started-at"),
-  requestCount: document.querySelector("#request-count"),
-  datasetHash: document.querySelector("#dataset-hash"),
-  lastUpdated: document.querySelector("#last-updated"),
-  deviceList: document.querySelector("#device-list"),
-  deviceSummary: document.querySelector("#device-summary"),
+  responseTime: document.querySelector("#response-time"),
+  performanceState: document.querySelector("#performance-state"),
+  requestsMinute: document.querySelector("#requests-minute"),
+  errorRate: document.querySelector("#error-rate"),
+  p95Latency: document.querySelector("#p95-latency"),
+  lastChecked: document.querySelector("#last-checked"),
   refreshButton: document.querySelector("#refresh-button"),
 };
 
-const dateFormatter = new Intl.DateTimeFormat("vi-VN", {
-  dateStyle: "medium",
-  timeStyle: "medium",
-});
+const originNames = {
+  "aws-primary": "AWS Primary",
+  "azure-standby": "Azure Standby",
+  local: "Local Preview",
+};
 
-function formatDuration(totalSeconds) {
-  const seconds = Math.floor(totalSeconds);
-  const hours = Math.floor(seconds / 3600);
+let isRefreshing = false;
+function clearPerformance(label) {
+  elements.performanceState.textContent = label;
+  elements.requestsMinute.textContent = "—";
+  elements.errorRate.textContent = "—";
+  elements.p95Latency.textContent = "—";
+}
+
+function renderPerformance(summary) {
+  if (!summary || !Number.isFinite(summary.requests)) {
+    clearPerformance("Chưa có dữ liệu");
+    return;
+  }
+  elements.performanceState.textContent = summary.requests > 0 ? "Đang cập nhật" : "Chưa có lưu lượng";
+  elements.requestsMinute.textContent = summary.requests.toLocaleString("vi-VN");
+  elements.errorRate.textContent = summary.error_percent === null ? "—" : summary.error_percent + "%";
+  elements.p95Latency.textContent = summary.p95_ms === null ? "—" : summary.p95_ms + " ms";
+}
+
+function formatUptime(totalSeconds) {
+  const seconds = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
   const remainingSeconds = seconds % 60;
-  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(remainingSeconds).padStart(2, "0")}`;
+  const clock = [hours, minutes, remainingSeconds]
+    .map((part) => String(part).padStart(2, "0"))
+    .join(":");
+  return days > 0 ? days + " ngày " + clock : clock;
 }
 
-function statusLabel(status) {
-  return status.replaceAll("_", " ");
+function updateHealth(state, label) {
+  elements.healthStatus.classList.remove("is-checking", "is-healthy", "is-unavailable");
+  elements.healthStatus.classList.add("is-" + state);
+  elements.healthText.textContent = label;
 }
 
-function renderDevices(devices) {
-  elements.deviceList.replaceChildren(
-    ...devices.map((device) => {
-      const row = document.createElement("tr");
-      const values = [device.id, device.name, device.type, device.location];
-      values.forEach((value) => {
-        const cell = document.createElement("td");
-        cell.textContent = value;
-        row.append(cell);
-      });
-      const statusCell = document.createElement("td");
-      const badge = document.createElement("span");
-      badge.className = `badge badge-${device.status}`;
-      badge.textContent = statusLabel(device.status);
-      statusCell.append(badge);
-      row.append(statusCell);
-      return row;
-    }),
-  );
-  elements.deviceSummary.textContent = `${devices.length} thiết bị mẫu`;
-}
+async function refreshStatus() {
+  if (isRefreshing || document.hidden) return;
 
-async function refreshDashboard() {
-  const started = performance.now();
+  isRefreshing = true;
   elements.refreshButton.disabled = true;
-  try {
-    const [statusResponse, devicesResponse] = await Promise.all([
-      fetch("/api/status", { cache: "no-store" }),
-      fetch("/api/devices", { cache: "no-store" }),
-    ]);
-    if (!statusResponse.ok || !devicesResponse.ok) {
-      throw new Error(`API response: ${statusResponse.status}/${devicesResponse.status}`);
-    }
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 5000);
+  const started = performance.now();
 
-    const [status, devicesPayload] = await Promise.all([
-      statusResponse.json(),
-      devicesResponse.json(),
-    ]);
-    const elapsed = Math.round(performance.now() - started);
-    elements.healthBanner.classList.remove("is-unavailable");
-    elements.healthBanner.classList.add("is-healthy");
-    elements.healthStatus.textContent = "Healthy";
-    elements.environment.textContent = status.environment;
-    elements.region.textContent = status.region;
-    elements.version.textContent = status.version;
-    elements.commit.textContent = `commit ${status.commit_sha}`;
-    elements.responseTime.textContent = `${elapsed} ms`;
-    elements.uptime.textContent = formatDuration(status.uptime_seconds);
-    elements.startedAt.textContent = `Started ${dateFormatter.format(new Date(status.started_at))}`;
-    elements.requestCount.textContent = status.request_count.toLocaleString("vi-VN");
-    elements.datasetHash.textContent = status.dataset_sha256.slice(0, 12);
-    elements.lastUpdated.textContent = `Cập nhật ${dateFormatter.format(new Date())}`;
-    renderDevices(devicesPayload.devices);
-  } catch (error) {
-    elements.healthBanner.classList.remove("is-healthy");
-    elements.healthBanner.classList.add("is-unavailable");
-    elements.healthStatus.textContent = "Unavailable";
-    elements.lastUpdated.textContent = `Không thể gọi API: ${error.message}`;
+  try {
+    const response = await fetch("/api/status?ts=" + Date.now(), {
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error("HTTP " + response.status);
+
+    const status = await response.json();
+    if (status.status !== "healthy") throw new Error("Service not ready");
+
+    updateHealth("healthy", "Đang hoạt động");
+    elements.cloudLabel.textContent =
+      originNames[status.environment] || status.environment || "Không xác định";
+    elements.environment.textContent = status.environment || "—";
+    elements.region.textContent = status.region || "—";
+    elements.uptime.textContent = formatUptime(status.uptime_seconds);
+    elements.responseTime.textContent = Math.round(performance.now() - started) + " ms";
+    renderPerformance(status.workload_60s);
+  } catch {
+    updateHealth("unavailable", "Không kết nối");
+    elements.cloudLabel.textContent = "Không khả dụng";
+    elements.environment.textContent = "—";
+    elements.region.textContent = "—";
+    elements.uptime.textContent = "—";
+    elements.responseTime.textContent = "—";
+    clearPerformance("Không thể kiểm tra");
   } finally {
+    window.clearTimeout(timeout);
+    elements.lastChecked.textContent =
+      "Kiểm tra lúc " + new Intl.DateTimeFormat("vi-VN", { timeStyle: "medium" }).format(new Date());
     elements.refreshButton.disabled = false;
+    isRefreshing = false;
   }
 }
 
-elements.refreshButton.addEventListener("click", refreshDashboard);
-refreshDashboard();
-window.setInterval(refreshDashboard, 3000);
+elements.refreshButton.addEventListener("click", refreshStatus);
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) refreshStatus();
+});
+refreshStatus();
+window.setInterval(refreshStatus, 5000);

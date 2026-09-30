@@ -2,23 +2,27 @@
 
 Ngày lập: 22/09/2026.
 
+> **Lưu ý cập nhật 24/09/2026:** Đây là bản kế hoạch ban đầu; các bước Azure Container Apps bên dưới **đã lỗi thời và không dùng để triển khai**. Nhóm đã chuyển Azure standby sang **Ubuntu VM + Docker Compose**. Azure VM đang phục vụ dashboard/API qua HTTP; bằng chứng và việc còn cần xác nhận nằm trong [GĐ4 Azure VM Portal](docs/giai-doan/GIAI_DOAN_04_AZURE_PORTAL.md). Dùng [GĐ5 domain/HTTPS](docs/giai-doan/GIAI_DOAN_05_DOMAIN_VA_HTTPS.md) và [GĐ6 Route 53 failover](docs/giai-doan/GIAI_DOAN_06_ROUTE53_FAILOVER.md) cho các bước tiếp theo. Khi thử failover tự động, Azure VM phải đang chạy và healthy; ngoài giờ demo có thể deallocate để giảm phí compute.
+
+Sơ đồ mới dùng đúng Azure VM: [PNG](images/kien-truc-multi-cloud.png) · [SVG chỉnh sửa được](images/kien-truc-multi-cloud.svg) · [workflow và nguồn icon](images/ARCHITECTURE.md).
+
 ## 1. Phương án chốt và phạm vi tài liệu
 
-Xây một website tra cứu thiết bị phòng lab, chạy cùng phiên bản trên AWS EC2 và Azure Container Apps. AWS phục vụ chính; Azure chạy sẵn để tiếp quản khi AWS không truy cập được. Route 53 thực hiện DNS failover. Prometheus/Grafana quan sát hệ thống, k6 tạo tải và lưu kết quả thí nghiệm.
+Xây một website tra cứu thiết bị phòng lab, chạy cùng phiên bản trên AWS EC2 và Azure Ubuntu VM. AWS phục vụ chính; Azure chạy sẵn để tiếp quản khi AWS không truy cập được. Route 53 sẽ thực hiện DNS failover. Prometheus/Grafana quan sát hệ thống, k6 tạo tải và lưu kết quả thí nghiệm.
 
-Giai đoạn 1 của hướng dẫn này đã được hiện thực và kiểm tra cục bộ: dashboard read-only, các API health/status, dữ liệu thiết bị mẫu, Prometheus metrics và API tests nằm trong `app/` và `tests/`. Các phần triển khai AWS, Azure, Route 53, domain/HTTPS và thí nghiệm failover phía dưới vẫn là kế hoạch có placeholder; chưa có tài nguyên cloud nào được tạo.
+GĐ1–GĐ2 đã hoàn thành; AWS EC2 có kết quả do người triển khai cung cấp. Ngày 24/09/2026, Azure VM đã trả dashboard và các API công khai với đúng commit/fingerprint dự kiến. Route 53, domain/HTTPS và thí nghiệm failover chưa được xác nhận. Các mục triển khai Container Apps phía dưới chỉ còn giá trị lịch sử; xem [lộ trình hiện tại](docs/giai-doan/README.md).
 
 Giả định nhóm 3-4 người, biết AWS cơ bản, có 6-8 tuần. Chưa xác định ngân sách nên ưu tiên stack nhỏ và chỉ chạy thí nghiệm trong thời gian đã lên lịch.
 
 **Bản đầu tiên hoàn chỉnh:** ứng dụng read-only, hai cloud thật, một domain chung, HTTPS hợp lệ ở cả hai bên, failover tự động, dữ liệu thí nghiệm lặp lại được. Không cần Kubernetes để triển khai phương án này.
 
-Lưu ý về môn học: PDF liệt kê Kubernetes trong Tools và ghi riêng Terraform optional. Không thể từ đó khẳng định chắc chắn mọi công cụ còn lại đều tùy chọn. Nhóm nên xác nhận với giảng viên việc thay Kubernetes bằng EC2/Docker và Container Apps trước khi đăng ký stack chính thức.
+Lưu ý về môn học: PDF liệt kê Kubernetes trong Tools và ghi riêng Terraform optional. Không thể từ đó khẳng định chắc chắn mọi công cụ còn lại đều tùy chọn. Nhóm nên xác nhận với giảng viên việc dùng EC2/Azure VM và Docker Compose thay Kubernetes khi chốt phạm vi báo cáo.
 
 ## 2. Đối chiếu yêu cầu đề tài
 
 | Yêu cầu trong PDF | Cách thực hiện | Bằng chứng nộp |
 |---|---|---|
-| Cùng ứng dụng ở hai môi trường độc lập | AWS EC2 và Azure Container Apps, cùng image digest | Deployment config, kết quả /version |
+| Cùng ứng dụng ở hai môi trường độc lập | AWS EC2 và Azure Ubuntu VM, cùng image digest theo cấu hình; cần kiểm tra digest đang chạy trên VM | Deployment config, kết quả /version |
 | Health monitoring và traffic switching | Route 53 kiểm tra riêng từng origin, failover records | Cấu hình DNS, trạng thái health check |
 | Mô phỏng một môi trường ngừng hoạt động hoàn toàn | Stop EC2 duy nhất chứa toàn bộ app AWS | Sự kiện stop, origin AWS mất kết nối, Azure vẫn phục vụ |
 | Đo failover time, downtime, latency | k6, probe liên tục, timeline UTC | Dữ liệu thô, bảng và biểu đồ |

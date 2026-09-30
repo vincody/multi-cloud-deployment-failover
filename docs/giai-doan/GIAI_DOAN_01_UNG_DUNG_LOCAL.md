@@ -14,7 +14,7 @@ Bản đầu không có đăng nhập, CRUD hay database. Dataset được đón
 | Thành phần | File | Vai trò |
 |---|---|---|
 | FastAPI backend | `app/main.py` | API, health, runtime identity, metrics, static UI |
-| Dashboard | `app/static/` | Hiển thị origin, version, latency, uptime và thiết bị |
+| Dashboard | `app/static/` | Hiển thị trạng thái, origin, uptime, độ trễ tới API, lưu lượng workload, tỷ lệ lỗi và p95; không hiện thiết bị |
 | Dataset | `app/data/devices.json` | 6 thiết bị giả lập dùng giống nhau ở mọi môi trường |
 | Automated tests | `tests/test_api.py` | Kiểm tra readiness, identity, cache headers và dataset |
 | Cấu hình mẫu | `.env.example` | Mô tả biến môi trường, không chứa secret |
@@ -27,7 +27,7 @@ Bản đầu không có đăng nhập, CRUD hay database. Dataset được đón
 2. Backend đọc `devices.json` và parse JSON.
 3. Backend tính SHA-256 trên bytes của dataset.
 4. Khi dữ liệu nạp thành công, health/readiness và API bắt đầu phục vụ.
-5. UI tại `/` gọi `/api/status` và `/api/devices` bằng URL tương đối mỗi 3 giây.
+5. UI tại `/` gọi `/api/status` bằng URL tương đối mỗi 5 giây khi tab đang hiển thị. `/api/devices` vẫn dành cho kịch bản tải GD8, không được gọi từ UI.
 6. Middleware đo duration, tăng request counter và gắn headers nhận diện.
 7. Prometheus đọc counter/histogram từ `/metrics`.
 
@@ -61,7 +61,7 @@ API/health/version có `Cache-Control: no-store` để cache không che sự c�
 
 ## 6. UI đã làm
 
-Dashboard hiển thị service health, môi trường/region, version/commit, response time, uptime, request count, dataset fingerprint và bảng thiết bị. UI refresh 3 giây một lần. Khi API lỗi, banner chuyển `Unavailable` thay vì giữ trạng thái xanh từ lần gọi trước.
+**Cập nhật giao diện 28/09/2026:** Trang chính theo `DESIGN.md`, không có sidebar hay biểu đồ. Nội dung tập trung vào health, cloud đang phục vụ, region, uptime, độ trễ gọi `/api/status` từ trình duyệt và ba chỉ số workload trong 60 giây: số request `/api/devices`, tỷ lệ response lỗi (HTTP 4xx/5xx) và độ trễ server p95. Khi chưa có request workload, tỷ lệ lỗi và p95 hiển thị `—` thay vì số giả. Không hiển thị version/commit, bảng thiết bị lab hay CPU/RAM VM. UI tự kiểm tra mỗi 5 giây khi tab đang hiển thị; request `/api/status` không được tính vào workload. Khi API lỗi, nội dung chuyển sang trạng thái không khả dụng thay vì giữ thông tin cloud cũ. Backend `/version` và `/api/devices` vẫn được giữ cho xác minh deploy và đo tải GD8.
 
 UI bám `DESIGN.md`: canvas near-black, surface charcoal, hairline border, lavender cho CTA/focus và màu semantic cho health. Grid responsive 3 → 2 → 1 cột; có focus-visible và reduced-motion.
 

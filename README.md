@@ -1,17 +1,17 @@
 # DCS29 Multi-Cloud Failover Dashboard
 
-Repository scaffold for project #29: the same service will run on AWS as the primary environment and Azure Container Apps as the standby environment. Route 53 will perform active-passive DNS failover.
+Project #29 runs one application on AWS EC2 (primary) and an Azure Ubuntu VM (standby). Route 53 switches the shared hostname to the healthy origin during failover.
 
 ## Current state
 
-Phase 1 is complete. Phase 2 adds a reproducible Linux AMD64 image and GitHub Actions pipeline that tests the app, publishes commit-tagged images to GHCR, and records the immutable digest. No cloud resources have been created.
+The application, AWS and Azure origins, HTTPS, Route 53 failover, and laptop-based Prometheus/Grafana/Blackbox monitoring have been set up. The operator has confirmed stage 7 is complete; stage 8 failover measurements and the final report remain. The dashboard now shows the serving cloud, region, uptime, and `/api/devices` workload metrics from the last 60 seconds. See [stage status and remaining checks](docs/giai-doan/README.md).
 
-## Planned layout
+## Project layout and planned artifacts
 
 ```text
 app/                 Application source, UI, sample data, and metrics
 deploy/aws/          EC2, NGINX, and Docker Compose configuration
-deploy/azure/        Azure Container Apps configuration and scripts
+deploy/azure/        Azure VM configuration or scripts, if added
 deploy/dns/          Route 53 configuration notes or infrastructure code
 observability/       Prometheus, Blackbox Exporter, and Grafana assets
 tests/load/          k6 traffic and failover scenarios
@@ -22,12 +22,13 @@ docs/                Project analysis and supporting documentation
 
 ## Documentation
 
-- [Multi-cloud deployment and failover analysis](docs/PHAN_TICH_DE_TAI_29_MULTI_CLOUD_FAILOVER.md)
-- [DevOps topic analysis](docs/GOI_Y_CHON_DE_TAI.md)
-- [AWS + Azure deployment and verification guide](HUONG_DAN_29_AWS_AZURE_DEPLOY_VA_KIEM_THU.md)
+- [Architecture and workflow](images/ARCHITECTURE.md)
+- [AWS Console deployment](docs/giai-doan/GIAI_DOAN_03_AWS_CONSOLE.md)
+- [Azure Portal deployment and verification](docs/giai-doan/GIAI_DOAN_04_AZURE_PORTAL.md)
 - [Implementation stages and current progress](docs/giai-doan/README.md)
+- [Original planning guide (contains superseded Container Apps steps)](HUONG_DAN_29_AWS_AZURE_DEPLOY_VA_KIEM_THU.md)
 
-## Run Phase 1 locally
+## Run locally
 
 Create the local Python environment and install the test/runtime dependencies:
 
@@ -49,3 +50,21 @@ Run the automated API checks:
 ```
 
 Useful endpoints: `/api/status`, `/api/devices`, `/health/live`, `/health/ready`, `/version`, and `/metrics`.
+
+The dashboard polls `/api/status` every five seconds. Request rate, app error rate, and app p95 latency cover `/api/devices` traffic only; an idle app shows no workload error rate or p95 value. Browser-to-API latency is measured separately in the browser.
+
+## Build and publish the container
+
+Build and smoke-test a Linux AMD64 image locally:
+
+```powershell
+docker build --platform linux/amd64 -t dcs29-local:check .
+docker run --rm -d --name dcs29-check -p 18080:8080 dcs29-local:check
+Invoke-WebRequest -UseBasicParsing http://127.0.0.1:18080/health/ready
+Invoke-WebRequest -UseBasicParsing http://127.0.0.1:18080/version
+docker stop dcs29-check
+```
+
+Pushing a commit to `main` runs [the container workflow](.github/workflows/container.yml): API tests, a Linux AMD64 build, publication to `ghcr.io/vincody/multi-cloud-deployment-failover`, and a clean-pull runtime check. The workflow publishes `main` and `sha-<commit>` tags and records the immutable image digest as a run artifact. Deploy the **same digest** to AWS and Azure; do not use a mutable tag as evidence that both origins run identical code.
+
+Do not commit `.env` files, cloud credentials, private keys, certificates, or Terraform state. The repository ignores common secret and local-state paths, but review staged files before every push.
