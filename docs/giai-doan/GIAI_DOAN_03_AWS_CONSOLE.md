@@ -1,6 +1,6 @@
 # GĐ3 — Hướng dẫn thao tác AWS Console và triển khai EC2
 
-**Trạng thái:** hướng dẫn để thực hiện; chưa tạo tài nguyên cloud. **Kết quả cần đạt:** một origin AWS độc lập phục vụ dashboard và API qua Elastic IP, chạy đúng image GHCR của GĐ2. GĐ3 chỉ dùng HTTP; domain, HTTPS và Route 53 thuộc GĐ5–GĐ6.
+**Kết quả cần đạt:** một origin AWS độc lập phục vụ dashboard và API qua Elastic IP, chạy đúng `GHCR_IMAGE@sha256:IMAGE_DIGEST` lấy ở GĐ2. GĐ3 chỉ dùng HTTP; domain, HTTPS và Route 53 thuộc GĐ5–GĐ6. Điền [bảng thông số](THONG_SO_TRIEN_KHAI.md) trước khi nhập các ký hiệu mẫu vào lệnh.
 
 ## 1. Cần tạo những gì?
 
@@ -11,7 +11,7 @@ Internet → Elastic IP → Security Group (80) → EC2 Ubuntu
 
 | Tài nguyên                  | Số lượng | Giá trị gợi ý                                                    |
 | ----------------------------- | ----------: | -------------------------------------------------------------------- |
-| Default VPC và public subnet |  Dùng sẵn | Region Singapore`ap-southeast-1`                                   |
+| Default VPC và public subnet | Dùng sẵn | Region `AWS_REGION` bạn chọn theo quota/chi phí |
 | Security Group                |           1 | SSH 22 chỉ từ IP quản trị; HTTP 80 từ Internet; không mở 8080 |
 | EC2                           |           1 | Ubuntu 24.04 LTS x86_64, ví dụ`t3.small` sau khi xem giá        |
 | EBS root                      |           1 | `gp3`, ví dụ 12 GiB                                              |
@@ -19,7 +19,7 @@ Internet → Elastic IP → Security Group (80) → EC2 Ubuntu
 | Key pair                      |           1 | RSA`.pem` để SSH; giữ ngoài repository                         |
 | AWS Budget                    |           1 | Cảnh báo chi phí theo hạn mức nhóm chọn                       |
 
-Image app bắt buộc: `ghcr.io/vincody/multi-cloud-deployment-failover@sha256:e48779c88fd265bebcf7bdaabfef39bf47d8498eac49b03ab30e9e61a7d51fe5`. Đây là artifact GĐ2 cho `linux/amd64`, commit `5b362a2321713ce8dfef45101bf37e834a21cc73`; GĐ4 Azure sẽ dùng **cùng digest**. [GĐ2](GIAI_DOAN_02_IMAGE_VA_CI.md).
+Image app bắt buộc: `GHCR_IMAGE@sha256:IMAGE_DIGEST` từ **run GĐ2 của bạn** cho `linux/amd64`, commit `COMMIT_SHA`; GĐ4 Azure sẽ dùng **cùng digest**. [GĐ2](GIAI_DOAN_02_IMAGE_VA_CI.md).
 
 Trước khi làm, chuẩn bị AWS account có quyền EC2/VPC/EIP/Billing, IP công khai của laptop để giới hạn SSH, và GitHub token **classic** có `read:packages` nếu package GHCR còn private. GitHub account của token phải được cấp quyền đọc package. Không đưa token, `.pem` hay secret vào repo hoặc screenshot. [GitHub Container Registry](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry).
 
@@ -27,7 +27,7 @@ Ghi lại các ID sau trong sổ triển khai: `vpc-id`, `subnet-id`, `sg-id`, `
 
 ## 2. Chọn region và tạo Budget
 
-1. Mở AWS Console, chọn **Asia Pacific (Singapore) — `ap-southeast-1`** ở góc trên bên phải. Kiểm tra lại region khi chuyển giữa VPC và EC2 Console.
+1. Mở AWS Console, chọn region đã ghi là **`AWS_REGION`** ở góc trên bên phải (ví dụ Singapore có mã `ap-southeast-1`). Kiểm tra lại region khi chuyển giữa VPC và EC2 Console.
 2. Vào **Billing and Cost Management → Budgets → Create budget**. Chọn **Monthly cost budget** hoặc **Customize → Cost budget**. Nhập ngân sách tháng theo mức nhóm chấp nhận, email và ngưỡng cảnh báo, rồi tạo. Budget **chỉ cảnh báo**, không tự giới hạn hóa đơn. [AWS Budgets](https://docs.aws.amazon.com/cost-management/latest/userguide/create-cost-budget.html).
 3. Kiểm tra giá ở [AWS Pricing Calculator](https://calculator.aws/) cho instance type, EBS, public IPv4 và thời gian dự kiến chạy trong region này. Không mặc định instance được Free Tier. Elastic IP/public IPv4 vẫn tính phí kể cả đã gắn với EC2. [AWS Elastic IP](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/working-with-eips.html).
 
@@ -93,7 +93,7 @@ Elastic IP phải cùng network border group với EC2 và được tính phí k
 Trên laptop Windows PowerShell, thay đường dẫn key/IP thật:
 
 ```powershell
-ssh -i "C:\duong-dan-ngoai-repo\dcs29-aws-primary-key.pem" ubuntu@AWS_ELASTIC_IP
+ssh -i "C:\duong-dan-ngoai-repo\dcs29-aws-primary-key.pem" ubuntu@AWS_PUBLIC_IP
 ```
 
 Ubuntu AMI dùng user `ubuntu`. Nếu SSH timeout, kiểm tra EC2 Running, EIP, route Internet Gateway, SG 22 và IP hiện tại của laptop. Tab **Connect → SSH client** của instance cũng đưa lệnh tương ứng. [AWS connect EC2](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/EC2_GetStarted.html).
@@ -136,10 +136,10 @@ Dán nội dung sau vào `compose.yaml`; trong `nano`, lưu bằng `Ctrl+O`, Ent
 ```yaml
 services:
   app:
-    image: ghcr.io/vincody/multi-cloud-deployment-failover@sha256:e48779c88fd265bebcf7bdaabfef39bf47d8498eac49b03ab30e9e61a7d51fe5
+    image: GHCR_IMAGE@sha256:IMAGE_DIGEST
     environment:
       APP_ENV: aws-primary
-      APP_REGION: ap-southeast-1
+      APP_REGION: AWS_REGION
     restart: unless-stopped
     expose:
       - "8080"
@@ -191,7 +191,7 @@ Nếu GHCR package private, nhập token trong SSH mà không viết token vào 
 
 ```bash
 read -rsp 'GHCR token: ' GHCR_TOKEN; echo
-printf '%s' "$GHCR_TOKEN" | sudo docker login ghcr.io -u vincody --password-stdin
+printf '%s' "$GHCR_TOKEN" | sudo docker login ghcr.io -u GHCR_OWNER --password-stdin
 unset GHCR_TOKEN
 ```
 
@@ -215,31 +215,24 @@ Trên **EC2**:
 curl -fsS http://127.0.0.1/health/ready
 curl -fsS http://127.0.0.1/version
 curl -fsS http://127.0.0.1/api/devices
-sudo docker image inspect ghcr.io/vincody/multi-cloud-deployment-failover@sha256:e48779c88fd265bebcf7bdaabfef39bf47d8498eac49b03ab30e9e61a7d51fe5 --format '{{json .RepoDigests}}'
+sudo docker image inspect GHCR_IMAGE@sha256:IMAGE_DIGEST --format '{{json .RepoDigests}}'
 sudo docker image inspect nginx:stable-alpine --format '{{json .RepoDigests}}'
 ```
 
 Trong **PowerShell laptop**, thay Elastic IP thật:
 
 ```powershell
-Invoke-RestMethod "http://AWS_ELASTIC_IP/health/ready"
-Invoke-RestMethod "http://AWS_ELASTIC_IP/version"
-Invoke-RestMethod "http://AWS_ELASTIC_IP/api/devices"
-Test-NetConnection AWS_ELASTIC_IP -Port 8080
+Invoke-RestMethod "http://AWS_PUBLIC_IP/health/ready"
+Invoke-RestMethod "http://AWS_PUBLIC_IP/version"
+Invoke-RestMethod "http://AWS_PUBLIC_IP/api/devices"
+Test-NetConnection AWS_PUBLIC_IP -Port 8080
 ```
 
-Mở `http://AWS_ELASTIC_IP` trên browser để thấy dashboard. `/version` phải có `environment=aws-primary`, `region=ap-southeast-1`, commit và `dataset_sha256` khớp GĐ2. Cổng 8080 từ Internet phải không kết nối được; kiểm tra thêm screenshot SG không có rule 8080. GĐ3 dùng HTTP; HTTPS/certificate thuộc GĐ5.
+Mở `http://AWS_PUBLIC_IP` trên browser để thấy dashboard. `/version` phải có `environment=aws-primary`, `region=AWS_REGION`, commit và `dataset_sha256` khớp GĐ2. Cổng 8080 từ Internet phải không kết nối được; kiểm tra thêm screenshot SG không có rule 8080. GĐ3 dùng HTTP; HTTPS/certificate thuộc GĐ5.
 
-### Giá trị AWS đã ghi nhận để đối chiếu với Azure
+### Ghi mốc AWS để đối chiếu Azure
 
-Người triển khai cung cấp các giá trị sau sau khi kiểm tra AWS. Khi kiểm tra Azure ở GĐ4, so sánh `version` và fingerprint dữ liệu với bảng này:
-
-| Trường | Giá trị AWS đã cung cấp |
-|---|---|
-| `version` | `sha-5b362a2321713ce8dfef45101bf37e834a21cc73` |
-| 12 ký tự đầu của `dataset_sha256` hiển thị trên dashboard | `40242be543f3` |
-
-Giá trị `40242be543f3` chỉ là **phần đầu**, không phải toàn bộ SHA-256. Fingerprint đầy đủ dự kiến từ [GĐ1](GIAI_DOAN_01_UNG_DUNG_LOCAL.md) là `40242be543f3d25dc7d07a135ef1227c1006b3e60b0cb6e6610818ecd1fbbe9d`. Ngày 24/09/2026, `/version` Azure đã trả đúng fingerprint đầy đủ này và đúng commit AWS ghi nhận. Để chứng minh hash đầy đủ khớp **trực tiếp giữa hai cloud**, vẫn cần gọi `/version` AWS khi EC2 đang chạy rồi lưu cả hai kết quả trong cùng lượt kiểm tra. [Bằng chứng Azure](GIAI_DOAN_04_AZURE_PORTAL.md#9-kiểm-tra-và-so-sánh-với-aws).
+Lưu **toàn bộ** response `/version` của EC2, đặc biệt `version`, `commit_sha`, `dataset_sha256`, `environment` và `region`. Ở GĐ4 gọi `/version` trên cả hai VM trong cùng lượt; `commit_sha` và `dataset_sha256` phải trùng, còn `environment` và `region` khác theo cloud. Không so sánh chỉ 12 ký tự hash trên giao diện.
 
 ## 11. Thử khởi động lại và xử lý lỗi
 

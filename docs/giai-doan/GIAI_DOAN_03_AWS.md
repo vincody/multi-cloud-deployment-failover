@@ -1,6 +1,6 @@
 # Giai đoạn 3 — Deploy AWS EC2 origin chính
 
-**Trạng thái:** Chưa thực hiện.
+**Đầu vào:** điền `AWS_REGION`, `GHCR_IMAGE`, `IMAGE_DIGEST` trong [bảng thông số](THONG_SO_TRIEN_KHAI.md).
 **Mục tiêu:** tạo origin AWS độc lập chạy đúng GHCR digest của GĐ2 với `APP_ENV=aws-primary`. GĐ3 chỉ nghiệm thu origin trực tiếp; domain chung/TLS/failover thuộc GĐ5–GĐ6.
 
 **Hướng dẫn thao tác từng bước:** [AWS Console → EC2 → Docker Compose → kiểm tra nghiệm thu](GIAI_DOAN_03_AWS_CONSOLE.md).
@@ -8,8 +8,8 @@
 ## 1. Đầu vào bắt buộc
 
 - AWS account có quyền EC2, VPC, Security Group và Elastic IP.
-- Region dự kiến `ap-southeast-1`.
-- Image: `ghcr.io/vincody/multi-cloud-deployment-failover@sha256:e48779c88fd265bebcf7bdaabfef39bf47d8498eac49b03ab30e9e61a7d51fe5`.
+- Region dự kiến `AWS_REGION`.
+- Image: `GHCR_IMAGE@sha256:IMAGE_DIGEST`.
 - Nếu GHCR private: deployment token chỉ có `read:packages`.
 - IP quản trị hiện tại để giới hạn SSH.
 - Budget alert và tag `Project=dcs29`, `Owner=<nhóm>`.
@@ -50,8 +50,8 @@ Thêm user vào nhóm docker là tùy chọn; logout/login lại mới có hiệ
 ## 5. Pull private GHCR an toàn
 
 ```bash
-printf '%s' "$GHCR_TOKEN" | sudo docker login ghcr.io -u vincody --password-stdin
-sudo docker pull ghcr.io/vincody/multi-cloud-deployment-failover@sha256:e48779c88fd265bebcf7bdaabfef39bf47d8498eac49b03ab30e9e61a7d51fe5
+printf '%s' "$GHCR_TOKEN" | sudo docker login ghcr.io -u GHCR_OWNER --password-stdin
+sudo docker pull GHCR_IMAGE@sha256:IMAGE_DIGEST
 ```
 
 Nhập token qua session/secret manager, không ghi token vào Compose. Sau pull có thể logout registry nếu không cần auto-pull. Ghi lại digest từ `docker image inspect`.
@@ -60,7 +60,7 @@ Nhập token qua session/secret manager, không ghi token vào Compose. Sau pull
 
 Tạo thư mục `/opt/dcs29` chứa `compose.yaml` và `nginx.conf`. Compose có hai service:
 
-- `app` dùng image@digest, đặt `APP_ENV=aws-primary`, `APP_REGION=ap-southeast-1`, restart `unless-stopped`, chỉ expose 8080 nội bộ.
+- `app` dùng image@digest, đặt `APP_ENV=aws-primary`, `APP_REGION=AWS_REGION`, restart `unless-stopped`, chỉ expose 8080 nội bộ.
 - `nginx` publish 80, proxy tới `app:8080`, restart `unless-stopped`.
 
 Không đặt `build: .` trên EC2; server chỉ pull artifact GĐ2. Mount NGINX config read-only. Ở GĐ3, NGINX có thể phục vụ HTTP; GĐ5 bổ sung 443/certificate.
@@ -79,16 +79,16 @@ curl -f http://127.0.0.1/health/ready
 curl -f http://127.0.0.1/version
 ```
 
-Kỳ vọng version/commit/fingerprint khớp artifact GĐ2; environment là `aws-primary`, region là `ap-southeast-1`.
+Kỳ vọng version/commit/fingerprint khớp artifact GĐ2; environment là `aws-primary`, region là `AWS_REGION`.
 
 Từ laptop:
 
 ```powershell
-Invoke-WebRequest -UseBasicParsing http://AWS_ELASTIC_IP/health/ready
-Invoke-WebRequest -UseBasicParsing http://AWS_ELASTIC_IP/version
+Invoke-WebRequest -UseBasicParsing http://AWS_PUBLIC_IP/health/ready
+Invoke-WebRequest -UseBasicParsing http://AWS_PUBLIC_IP/version
 ```
 
-Kiểm tra `http://AWS_ELASTIC_IP:8080` không truy cập được.
+Kiểm tra `http://AWS_PUBLIC_IP:8080` không truy cập được.
 
 ## 8. Kiểm tra restart và tính độc lập
 

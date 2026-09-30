@@ -1,6 +1,6 @@
 # Giai đoạn 8 — Kiểm thử failover, phân tích và báo cáo
 
-**Trạng thái:** Chưa thực hiện.
+**Đầu vào:** hoàn thành GĐ1–GĐ7 với thông số của bạn trong [bảng triển khai](THONG_SO_TRIEN_KHAI.md). Chỉ dùng số đo, domain, digest và IP của chính lần thử này.
 **Mục tiêu:** chạy thí nghiệm lặp lại được và tính detection time, failover time, downtime, error rate, latency và cost proxy.
 
 ## 1. Điều kiện trước khi chạy

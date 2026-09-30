@@ -14,7 +14,7 @@
 4. Dừng EC2 để mô phỏng AWS lỗi. Khi AWS health check unhealthy và Azure vẫn healthy, Route 53 trả origin Azure cho DNS lookup mới. DNS TTL/cache và connection cũ có thể gây gián đoạn; đo thực tế bằng probe/k6.
 5. Blackbox Exporter trên laptop/máy thứ ba probe hai origin và domain chung; Prometheus scrape probe và metrics; Grafana hiển thị timeline; k6 tạo tải và lưu lỗi/latency; CloudWatch cung cấp trạng thái Route 53 health check. Start lại EC2 và quan sát failback.
 
-Sơ đồ thể hiện **kiến trúc mục tiêu** cho các giai đoạn GĐ4–GĐ8. Azure VM thực tế ở India South Central (`indiasouthcentral`); nhãn "East Asia" trong bản vẽ là giá trị phác thảo cũ. HTTPS và Route 53 failover đã được triển khai; người triển khai xác nhận monitoring GĐ7 hoàn thành trên laptop. GĐ8 còn cần đo và lưu kết quả. [Bằng chứng Azure](../docs/giai-doan/GIAI_DOAN_04_AZURE_PORTAL.md#9-kiểm-tra-và-so-sánh-với-aws) · [Route 53 failover](../docs/giai-doan/GIAI_DOAN_06_ROUTE53_FAILOVER.md).
+Sơ đồ thể hiện **kiến trúc mẫu** cho các giai đoạn GĐ4–GĐ8. Nhãn vùng Azure "East Asia" trên hình chỉ là minh họa; khi triển khai, chọn vùng được subscription cho phép và ghi mã thực tế vào `AZURE_REGION` theo [bảng thông số](../docs/giai-doan/THONG_SO_TRIEN_KHAI.md). Kiểm tra từng giai đoạn bằng kết quả của lần triển khai mới; không dùng hình này làm bằng chứng rằng HTTPS, failover hay monitoring đã hoạt động trong tài khoản của bạn. [Hướng dẫn Azure](../docs/giai-doan/GIAI_DOAN_04_AZURE_PORTAL.md#9-kiểm-tra-và-so-sánh-với-aws) · [Route 53 failover](../docs/giai-doan/GIAI_DOAN_06_ROUTE53_FAILOVER.md).
 
 ## Nguồn icon
 

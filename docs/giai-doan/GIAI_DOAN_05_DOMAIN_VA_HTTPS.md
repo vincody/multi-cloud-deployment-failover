@@ -1,59 +1,26 @@
 # Giai đoạn 5 — Domain chung và HTTPS trên AWS EC2 / Azure VM
 
-> **Nghỉ giữa GD5 và GD6:** Có thể stop cả EC2 và Azure VM rồi bật lại để làm tiếp. Cấu hình và certificate lưu trên disk vẫn còn; không cần làm lại GD5 nếu các kiểm tra sau khi bật đều pass.
->
-> - **AWS Console:** EC2 → Instances → chọn máy → Instance state → **Stop instance**. Giữ Elastic IP, không chọn Terminate. EBS và Elastic IP vẫn có phí.
-> - **Azure Portal:** Virtual machines → chọn VM → **Stop**; đợi trạng thái **Stopped (deallocated)** để ngừng phí compute. Giữ Static Public IP; disk và tài nguyên mạng vẫn có thể tính phí.
-> - **Khi quay lại:** Start cả hai, đợi Running; đối chiếu IP EC2 `18.143.30.46` và Azure `172.198.68.77` vẫn khớp DNS. EC2 phải dùng Elastic IP, Azure dùng Static IP; nếu IP đổi thì cập nhật A record và lệnh kiểm tra theo IP mới.
-> - **Nghỉ qua đêm:** không cần cấp lại certificate. VM tắt không chạy renewal; nếu nghỉ lâu, kiểm tra certificate còn hạn khi bật lại.
-> - **Trước khi làm/demo GD6:** cả hai origin phải đang chạy và healthy, kể cả Azure standby, trước khi gây lỗi AWS. Khi cả hai tắt, DNS vẫn có thể trả IP nhưng ứng dụng không truy cập được.
+**Đầu vào:** GĐ3/GĐ4 đã pass HTTP trên hai origin. Điền `YOUR_DOMAIN`, `AWS_PUBLIC_IP`, `AZURE_PUBLIC_IP`, `AWS_REGION`, `AZURE_REGION`, `CERT_EMAIL` trong [bảng thông số](THONG_SO_TRIEN_KHAI.md). Domain phải thuộc quyền quản lý của bạn; thay mọi ký hiệu mẫu trước khi nhập vào Console, NGINX hoặc chạy lệnh. `aws-origin.YOUR_DOMAIN`, `azure-origin.YOUR_DOMAIN`, `app.YOUR_DOMAIN` là ba hostname nằm trong **cùng một domain**, không phải ba domain phải mua.
 
-**Sau khi bật lại — chạy trên PowerShell laptop:**
+**Mục tiêu:** cả hai VM có HTTPS hợp lệ cho hostname origin riêng và hostname chung `app.YOUR_DOMAIN` trước khi GĐ6 tạo DNS failover. AWS dùng IAM role cho Certbot DNS-01; Azure dùng credential DNS giới hạn quyền, lưu ngoài repo. Không chép certificate/private key giữa hai cloud.
 
-```powershell
-curl.exe --fail-with-body https://aws-origin.cloudfailover.id.vn/health/ready
-curl.exe --fail-with-body https://azure-origin.cloudfailover.id.vn/health/ready
-```
-
-Cả hai phải trả HTTP thành công. Nếu container chưa tự chạy, vào **SSH của máy gặp lỗi** (lệnh giống nhau cho EC2 và Azure):
-
-```bash
-cd /opt/dcs29
-sudo docker compose up -d --pull never
-sudo docker compose ps
-```
-
-Gọi lại hai endpoint HTTPS trên laptop. Khi đều pass và checklist GD5 đạt, tiếp tục GD6 bình thường. Tham khảo [AWS: trạng thái và phí EC2](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-instance-lifecycle.html) và [Microsoft: trạng thái và phí VM](https://learn.microsoft.com/en-us/azure/virtual-machines/states-billing).
-
-**Trạng thái:** Theo xác nhận của bạn, NS đã cập nhật, hai HTTPS origin hoạt động và các lệnh mục 9.2 đã trả kết quả. Bạn đã tiếp tục phần redirect/renewal và đang rà lại tài liệu; chưa lưu evidence theo lựa chọn của bạn. Đối chiếu checklist mục 13 để chốt nghiệm thu, không cần làm lại các bước đã pass.
-**Đầu vào:** GĐ3 và GĐ4 đã chạy ứng dụng qua HTTP. Theo xác nhận của người thực hiện, GĐ4 đã xong.
-**Mục tiêu:** cả hai VM nhận cùng hostname người dùng qua HTTPS hợp lệ trước khi tạo DNS failover ở GĐ6.
-
-**Domain và IP đã được bạn cung cấp:**
-
-| Tài nguyên       | Giá trị                   |
-| ------------------ | --------------------------- |
-| Domain             | `cloudfailover.id.vn`     |
-| AWS EC2 Public IP  | **`18.143.30.46`**  |
-| Azure VM Public IP | **`172.198.68.77`** |
-
-Chỉ một domain là đủ. Tạo A record `aws-origin` trỏ tới `18.143.30.46` sẽ có `aws-origin.cloudfailover.id.vn`; tạo A record `azure-origin` trỏ tới `172.198.68.77` sẽ có `azure-origin.cloudfailover.id.vn`. Không cần mua thêm domain hay xin subdomain. Đối chiếu AWS IP là Elastic IP và Azure IP là Static ở mục 2.2 trước khi dùng lâu dài.
+Nếu tạm nghỉ giữa GĐ5/GĐ6, có thể stop hai VM; khi bật lại, xác nhận Elastic IP/Static Public IP, container và certificate còn hoạt động. VM tắt thì cả ứng dụng lẫn renewal không chạy. [AWS EC2 lifecycle](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-instance-lifecycle.html) · [Azure VM billing](https://learn.microsoft.com/en-us/azure/virtual-machines/states-billing).
 
 ## 1. Ta sẽ làm gì?
 
 ```text
-aws-origin.cloudfailover.id.vn   → 18.143.30.46   → NGINX HTTPS → app:8080
-azure-origin.cloudfailover.id.vn → 172.198.68.77  → NGINX HTTPS → app:8080
+aws-origin.YOUR_DOMAIN   → AWS_PUBLIC_IP   → NGINX HTTPS → app:8080
+azure-origin.YOUR_DOMAIN → AZURE_PUBLIC_IP  → NGINX HTTPS → app:8080
 
-app.cloudfailover.id.vn: certificate hợp lệ trên CẢ HAI VM
+app.YOUR_DOMAIN: certificate hợp lệ trên CẢ HAI VM
                 kiểm tra bằng curl --resolve trước khi tạo DNS failover
 ```
 
-Route 53 chỉ trả lời DNS. Khi đổi đích từ AWS sang Azure, trình duyệt vẫn gửi TLS SNI và HTTP Host là `app.cloudfailover.id.vn`. Do đó certificate trên mỗi VM phải chứa hostname chung này.
+Route 53 chỉ trả lời DNS. Khi đổi đích từ AWS sang Azure, trình duyệt vẫn gửi TLS SNI và HTTP Host là `app.YOUR_DOMAIN`. Do đó certificate trên mỗi VM phải chứa hostname chung này.
 
 Quy trình chính dùng **Certbot + ACME DNS-01 + plugin Route 53**. Certbot chạy trên Ubuntu host, tự thêm/xóa TXT xác thực ở Route 53; NGINX chạy trong Docker đọc certificate từ host. AWS dùng IAM role; Azure dùng IAM user riêng có quyền DNS giới hạn cho lab. Hai VM cấp certificate riêng, không sao chép private key giữa cloud. Không cần ALB, Azure Container Apps hoặc certificate của các dịch vụ đó.
 
-**Thứ tự:** tạo hosted zone → đợi domain được duyệt → đổi bốn NS tại Mắt Bão → kiểm tra NS công khai → tạo hai A record origin → mở 443 → quyền DNS → certificate AWS → NGINX AWS → lặp lại Azure → renewal → nghiệm thu. Chưa tạo record `app` hoặc health check trong GD5. Browser sẽ kiểm tra hai hostname origin; hostname chung được kiểm tra bằng `curl --resolve`.
+**Thứ tự:** tạo hosted zone → đợi domain được duyệt → đổi bốn NS tại nhà đăng ký tên miền → kiểm tra NS công khai → tạo hai A record origin → mở 443 → quyền DNS → certificate AWS → NGINX AWS → lặp lại Azure → renewal → nghiệm thu. Chưa tạo record `app` hoặc health check trong GD5. Browser sẽ kiểm tra hai hostname origin; hostname chung được kiểm tra bằng `curl --resolve`.
 
 ### Nơi thao tác và cách đọc lệnh
 
@@ -61,9 +28,9 @@ Quy trình chính dùng **Certbot + ACME DNS-01 + plugin Route 53**. Certbot ch�
 |---|---|---|
 | AWS CONSOLE | Trình duyệt laptop, AWS Console | Route 53/IAM và tài nguyên EC2 |
 | AZURE PORTAL | Trình duyệt laptop, Azure Portal | VM, Public IP và NSG Azure |
-| MẮT BÃO | Trình duyệt laptop, quản trị domain | Đổi nameserver |
-| CHỈ EC2 | SSH Ubuntu EC2 `18.143.30.46` | Chạy một lần trên EC2 |
-| CHỈ AZURE | SSH Ubuntu Azure `172.198.68.77` | Chạy một lần trên Azure |
+| NHÀ ĐĂNG KÝ | Trình duyệt laptop, trang quản trị domain của bạn | Đổi nameserver |
+| CHỈ EC2 | SSH Ubuntu EC2 `AWS_PUBLIC_IP` | Chạy một lần trên EC2 |
+| CHỈ AZURE | SSH Ubuntu Azure `AZURE_PUBLIC_IP` | Chạy một lần trên Azure |
 | CẢ HAI MÁY | Hai phiên SSH trên | Làm trên EC2 rồi lặp lại cùng lệnh trên Azure |
 | LAPTOP | PowerShell Windows, ngoài SSH | Kiểm tra DNS/HTTP/HTTPS của cả hai cloud |
 
@@ -71,34 +38,26 @@ Lệnh giống nhau được ghi một lần với nhãn **CẢ HAI MÁY**. Lệ
 
 Trước khi kiểm tra endpoint, cả EC2 và Azure VM phải đang Running và container đã chạy. IP vẫn phân giải DNS được khi VM tắt, nhưng curl sẽ không kết nối được.
 
-## 2. Bạn đã có domain — bắt đầu từ đâu?
+## 2. Chuẩn bị domain và địa chỉ origin
 
-**Bạn đã đăng ký `cloudfailover.id.vn`, cập nhật NS và triển khai hai origin; chưa có subdomain là hoàn toàn bình thường. Không cần xin hay mua thêm ba subdomain.** Chúng được tạo bằng bản ghi DNS dưới domain này ở mục 4 và GĐ6.
-
-Phân biệt ba việc:
-
-| Việc                     | Ý nghĩa                                                          | Hiện tại                                          |
-| ------------------------- | ------------------------------------------------------------------ | --------------------------------------------------- |
-| Đăng ký domain         | Bạn có quyền sử dụng`cloudfailover.id.vn`                   | Đã đăng ký; bạn đã xác nhận NS mới   |
-| Nối domain với Route 53 | Đổi nameserver tại Mắt Bão để Route 53 quản lý DNS        | Làm ở mục 3                                      |
-| Tạo subdomain            | Thêm record như`aws-origin` trong zone `cloudfailover.id.vn` | Làm ở mục 4, không phải đăng ký domain mới |
+Bạn cần một domain đã đăng ký và quyền thay đổi nameserver tại nhà đăng ký. Chưa cần có sẵn subdomain: ở mục 4 bạn sẽ tạo hai A record `aws-origin`/`azure-origin`, ở GĐ6 tạo hai record failover cùng tên `app`. Nếu domain đang có website/email, sao chép các record đang dùng sang Route 53 trước khi đổi nameserver; kiểm tra DNSSEC/DS tại nhà đăng ký.
 
 ### 2.1. Các tên ta sẽ dùng
 
 | Tên                                 | Dùng để làm gì?                                                     | Khi nào tạo DNS?                                                             |
 | ------------------------------------ | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------ |
-| `cloudfailover.id.vn`              | Domain bạn đã đăng ký, đồng thời là tên hosted zone           | Mục 3 tạo zone; chưa cần A record cho domain gốc                          |
-| `aws-origin.cloudfailover.id.vn`   | Địa chỉ riêng của ứng dụng trên AWS                              | Mục 4 tạo A record`aws-origin`                                             |
-| `azure-origin.cloudfailover.id.vn` | Địa chỉ riêng của ứng dụng trên Azure                            | Mục 4 tạo A record`azure-origin`                                           |
-| `app.cloudfailover.id.vn`          | Địa chỉ chung của người dùng, sẽ tự đổi cloud khi có sự cố | GĐ5 cấp certificate và kiểm tra ép IP; GĐ6 mới tạo DNS failover`app` |
+| `YOUR_DOMAIN`              | Domain bạn đã đăng ký, đồng thời là tên hosted zone           | Mục 3 tạo zone; chưa cần A record cho domain gốc                          |
+| `aws-origin.YOUR_DOMAIN`   | Địa chỉ riêng của ứng dụng trên AWS                              | Mục 4 tạo A record`aws-origin`                                             |
+| `azure-origin.YOUR_DOMAIN` | Địa chỉ riêng của ứng dụng trên Azure                            | Mục 4 tạo A record`azure-origin`                                           |
+| `app.YOUR_DOMAIN`          | Địa chỉ chung của người dùng, sẽ tự đổi cloud khi có sự cố | GĐ5 cấp certificate và kiểm tra ép IP; GĐ6 mới tạo DNS failover`app` |
 
-Ví dụ: khi thêm A record tên **`aws-origin`** vào hosted zone **`cloudfailover.id.vn`**, bạn vừa tạo subdomain **`aws-origin.cloudfailover.id.vn`**. Không cần tạo thư mục, mua hosting hoặc xin subdomain từ Mắt Bão.
+Ví dụ: khi thêm A record tên **`aws-origin`** vào hosted zone **`YOUR_DOMAIN`**, bạn vừa tạo subdomain **`aws-origin.YOUR_DOMAIN`**. Không cần tạo thư mục, mua hosting hoặc xin subdomain từ nhà đăng ký tên miền.
 
 ### 2.2. Trước khi mở Route 53, lấy hai IP của VM
 
 **Lấy AWS Elastic IP:**
 
-1. Mở **AWS Console → EC2**, chọn region **Singapore (`ap-southeast-1`)** như GĐ3.
+1. Mở **AWS Console → EC2**, chọn đúng region `AWS_REGION` của EC2 đã tạo ở GĐ3.
 2. Vào **Instances → chọn EC2 đang chạy ứng dụng → Networking**; xem **Elastic IP addresses**. Có thể vào **Network & Security → Elastic IPs** và đối chiếu **Associated instance ID** với EC2 này.
 3. Sao chép Elastic IPv4 đang gắn với EC2. Không lấy private IPv4, không lấy tên Public IPv4 DNS. Nếu chưa gắn Elastic IP, hoàn thành mục 6 của [GĐ3](GIAI_DOAN_03_AWS_CONSOLE.md#6-cấp-và-gắn-elastic-ip) trước.
 
@@ -111,114 +70,86 @@ Ví dụ: khi thêm A record tên **`aws-origin`** vào hosted zone **`cloudfail
 Lưu một ghi chú cá nhân như sau; chỉ điền những giá trị hiện đã có:
 
 ```text
-Domain / Hosted zone name: cloudfailover.id.vn
-Shared hostname: app.cloudfailover.id.vn
-AWS origin hostname: aws-origin.cloudfailover.id.vn
-Azure origin hostname: azure-origin.cloudfailover.id.vn
-AWS Public IP: 18.143.30.46 (đối chiếu Elastic IP)
-Azure Public IP: 172.198.68.77 (đối chiếu Static)
+Domain / Hosted zone name: YOUR_DOMAIN
+Shared hostname: app.YOUR_DOMAIN
+AWS origin hostname: aws-origin.YOUR_DOMAIN
+Azure origin hostname: azure-origin.YOUR_DOMAIN
+AWS Public IP: AWS_PUBLIC_IP (đối chiếu Elastic IP)
+Azure Public IP: AZURE_PUBLIC_IP (đối chiếu Static)
 Hosted zone ID: <để trống; lấy sau khi làm mục 3.1>
-Email nhận thông báo certificate: <email thật của bạn/nhóm>
+Email nhận thông báo certificate: CERT_EMAIL
 Người kiểm tra renewal: <tên thành viên phụ trách>
 ```
 
-**Không cần tự nghĩ giá trị Hosted zone ID hoặc nameserver.** AWS sẽ tạo chúng khi bạn tạo hosted zone. Email dùng trong lệnh Certbot phải thay bằng email thật đang nhận thư; không dùng `nhom@cloudfailover.id.vn` nếu bạn chưa tạo mailbox đó.
+**Không cần tự nghĩ giá trị Hosted zone ID hoặc nameserver.** AWS sẽ tạo chúng khi bạn tạo hosted zone. Email dùng trong lệnh Certbot phải thay bằng email thật đang nhận thư; không dùng `CERT_EMAIL` nếu bạn chưa tạo mailbox đó.
 
-### 2.3. Thứ tự thực hiện theo trạng thái hiện tại
+### 2.3. Thứ tự làm từ đầu
 
-1. **Đã có:** hai Public IP `18.143.30.46` và `172.198.68.77`; đối chiếu loại IP ổn định theo mục 2.2.
-2. **Đã làm:** tạo hosted zone `cloudfailover.id.vn` ở mục 3.1 và lưu bốn NS. Không tạo lại zone.
-3. **Đã qua bước chờ:** bạn đã đổi nameserver và xác nhận bốn NS mới. Nếu làm lại từ đầu, phải đợi domain được kích hoạt trước khi sửa NS.
-4. **Sau khi được duyệt:** làm mục 3.2, nhập đủ bốn NS tại Mắt Bão và lưu.
-5. **Sau khi lưu NS:** làm mục 3.3, chạy `Resolve-DnsName` và đợi kết quả khớp bộ NS AWS.
-6. **Sau khi NS khớp:** làm mục 4, tạo hai A record `aws-origin` và `azure-origin`, rồi kiểm tra DNS A và HTTP.
-7. **Sau khi DNS/HTTP origin pass:** làm mục 5 trở đi để cấu hình và kiểm tra HTTPS.
+1. Hoàn thành GĐ3/GĐ4, lấy `AWS_PUBLIC_IP` là Elastic IP và `AZURE_PUBLIC_IP` là Static Public IP.
+2. Tạo **một** public hosted zone cho `YOUR_DOMAIN` ở Route 53; ghi `HOSTED_ZONE_ID` và **bốn NS mới của zone này**.
+3. Tại nhà đăng ký domain của bạn, đổi nameserver sang đúng bốn NS vừa lấy. Chờ truy vấn NS công khai khớp rồi mới tiếp tục.
+4. Tạo hai A record origin tới hai IP thật; xác nhận HTTP qua từng hostname.
+5. Mở 443, cấp quyền DNS-01, cấp certificate riêng trên AWS rồi Azure, cấu hình NGINX và kiểm tra HTTPS/renewal.
 
-Bạn **không cần có sẵn subdomain** để bắt đầu mục 3. Giữ nguyên image digest, `APP_ENV` và `APP_REGION` GĐ3/GĐ4: AWS `aws-primary` / `ap-southeast-1`, Azure `azure-standby` / `indiasouthcentral`.
+Không dùng IP, NS, hosted zone ID hoặc certificate của người triển khai khác.
 
 ## 3. AWS Console — tạo public hosted zone và nối domain
 
-### 3.1. Tạo hosted zone và lưu NS — đã hoàn thành
+### 3.1. Tạo hosted zone và lưu NS
 
-1. Đăng nhập AWS Console → tìm **Route 53** → **Hosted zones**.
-2. Nếu đã có **Public hosted zone** đúng domain, mở zone đó; không tạo zone trùng vì mỗi zone có nameserver riêng.
-3. Nếu chưa có, chọn **Create hosted zone**:
+1. AWS Console → **Route 53 → Hosted zones**. Nếu đã có **Public hosted zone** đúng `YOUR_DOMAIN` mà bạn sở hữu, mở nó và kiểm tra; không tạo zone trùng.
+2. Nếu chưa có, chọn **Create hosted zone**: Domain name = domain thật thay cho `YOUR_DOMAIN` (không có `https://`), Type = **Public hosted zone**, description/tag tùy nhóm.
+3. Sau khi tạo, ghi **Hosted zone ID** thành `HOSTED_ZONE_ID`. Trong record **NS**, sao chép đủ bốn nameserver vào `ROUTE53_NS_1` … `ROUTE53_NS_4`. Giữ record NS/SOA mặc định. Mỗi hosted zone có bộ NS riêng; tuyệt đối không chép NS từ ví dụ hoặc lần tạo cũ.
 
-| Trường    | Điền/chọn                                                                 |
-| ----------- | ---------------------------------------------------------------------------- |
-| Domain name | **`cloudfailover.id.vn`**; không có `https://` hay đường dẫn |
-| Description | `dcs29 multi-cloud demo`                                                   |
-| Type        | **Public hosted zone**                                                 |
-| Tags        | `Project=dcs29`, owner nhóm nếu dùng                                    |
+| Ô tại nhà đăng ký | Giá trị phải lấy từ zone của bạn |
+|---|---|
+| Nameserver 1 | `ROUTE53_NS_1` |
+| Nameserver 2 | `ROUTE53_NS_2` |
+| Nameserver 3 | `ROUTE53_NS_3` |
+| Nameserver 4 | `ROUTE53_NS_4` |
 
-4. Bấm **Create hosted zone**. Ghi **Hosted zone ID** và bốn nameserver trong record **NS**. Giữ record NS/SOA mặc định.
+Nếu Route 53 hiển thị dấu chấm cuối hostname, nhà đăng ký thường chấp nhận tên không có dấu chấm đó. Tạo zone chưa tự đổi delegation tại nhà đăng ký.
 
-### Nameserver Route 53 đã ghi nhận
+### 3.2. Đổi nameserver tại nhà đăng ký domain
 
-Bạn đã tạo hosted zone `cloudfailover.id.vn` và cung cấp bốn NS sau. Dùng đúng bộ này khi đổi nameserver tại Mắt Bão:
+Chỉ bắt đầu khi domain đã hoạt động và bạn có quyền sửa NS. Mở trang quản lý domain tại **nhà đăng ký của bạn** → chọn domain thật → **Nameservers/Name Server** → dùng nameserver tùy chỉnh. Nhập đủ bốn `ROUTE53_NS_1` … `ROUTE53_NS_4` từ chính hosted zone rồi lưu; mở lại trang để xác nhận. Tên nút có thể khác theo nhà đăng ký.
 
-| Ô nameserver tại Mắt Bão | Giá trị nhập             |
-| ---------------------------- | --------------------------- |
-| Nameserver 1                 | `ns-1139.awsdns-14.org`   |
-| Nameserver 2                 | `ns-652.awsdns-17.net`    |
-| Nameserver 3                 | `ns-2042.awsdns-63.co.uk` |
-| Nameserver 4 | `ns-296.awsdns-37.com` |
+Nếu domain đang có website/email, chuyển đầy đủ A/AAAA/CNAME/MX/TXT cần giữ sang hosted zone trước khi đổi NS. Nếu DNSSEC đang bật, cập nhật hoặc gỡ DS cũ theo hướng dẫn nhà đăng ký để tránh `SERVFAIL`. Không tạo origin record tại nhà đăng ký sau khi đã giao DNS cho Route 53.
 
-Record NS trên Route 53 hiển thị các tên với dấu chấm cuối (`.`), ví dụ `ns-1139.awsdns-14.org.`. Bảng trên bỏ dấu chấm cuối để nhập vào form Mắt Bão; vẫn là cùng nameserver. Không thay bằng IP của VM.
+### 3.3. Kiểm tra DNS — chỉ sau khi đã lưu bốn NS tại nhà đăng ký tên miền
 
-**Bạn đã xác nhận NS mới hiển thị; giữ bộ NS này để đối chiếu. Khi thực hiện từ đầu, cần đợi domain được duyệt trước khi đổi NS ở mục 3.2.** Tạo hosted zone không tự cập nhật nameserver tại Mắt Bão. Không cần chạy `Resolve-DnsName` ở bước này; kiểm tra DNS được đặt riêng tại mục 3.3, sau khi hoàn tất mục 3.2.
-
-Nếu sau này xóa và tạo lại hosted zone, phải lấy bộ NS mới thay vì dùng lại bảng này.
-
-### 3.2. Mắt Bão — đổi nameserver của cloudfailover.id.vn
-
-**Chỉ bắt đầu khi domain đã được duyệt/kích hoạt và Mắt Bão cho phép sửa Name Server.** Nếu vẫn chờ duyệt, dừng tại đây; giữ nguyên hosted zone và bốn NS đã lưu. Chưa thực hiện mục 3.3 hoặc cấp certificate.
-
-1. Giữ tab Route 53 đang mở. Trong hosted zone `cloudfailover.id.vn`, chọn record **NS** và sao chép từng giá trị trong **Value**: tổng cộng **bốn nameserver**. Đây là tên máy chủ dạng `ns-....awsdns-....`, không phải IP của EC2/Azure và không phải Hosted zone ID.
-2. Mở trang quản lý tài khoản Mắt Bão từ nơi bạn đã đăng ký domain. Theo [hướng dẫn Mắt Bão](https://wiki.matbao.net/kb/huong-dan-truy-cap-vao-quan-tri-ten-mien-tren-id-matbao-net/), trang quản trị cũ là `id.matbao.net`, trang được tài liệu hiện tại nêu là `id.axys.group`.
-3. Đăng nhập → **Tên miền → Quản lý tên miền → cloudfailover.id.vn**.
-4. Chọn **Name Server / Nameserver** → chọn **nameserver tùy chỉnh** (hoặc dùng nameserver của bạn).
-5. Thay các NS mặc định bằng **đủ bốn NS vừa sao chép từ chính zone Route 53 này**. Nếu giao diện ban đầu chỉ có hai ô, dùng chức năng thêm ô để nhập đủ bốn; nếu không có tùy chọn, yêu cầu hỗ trợ Mắt Bão cập nhật đủ bốn NS.
-6. Bấm **Lưu / Lưu thay đổi**, hoàn thành xác nhận nếu hệ thống yêu cầu. Mở lại để kiểm tra bốn NS đã lưu.
-
-**Không vào mục Bản ghi DNS của Mắt Bão để thêm hai IP ở bước này.** Ta chuyển quản lý DNS sang Route 53, nên các record ứng dụng sẽ tạo trên AWS ở mục 4. Sau khi đổi NS, domain vẫn đăng ký tại Mắt Bão; Route 53 chỉ quản lý DNS. Không cần chuyển nhà đăng ký hay mua hosting.
-
-Nếu domain đã dùng cho website/email, chép các record đang dùng sang zone mới trước khi đổi NS, gồm MX/TXT/CNAME cần thiết. DNSSEC đang bật ở registrar cần được phối hợp cập nhật DS khi đổi DNS provider để tránh `SERVFAIL`.
-
-### 3.3. Kiểm tra DNS — chỉ sau khi đã lưu bốn NS tại Mắt Bão
-
-Điều kiện: mục 3.2 đã hoàn tất và mở lại trang Mắt Bão thấy đủ bốn NS AWS đã lưu. Bây giờ mới chạy trên **PowerShell laptop**:
+Điều kiện: mục 3.2 đã hoàn tất và mở lại trang nhà đăng ký tên miền thấy đủ bốn NS AWS đã lưu. Bây giờ mới chạy trên **PowerShell laptop**:
 
 ```powershell
-Resolve-DnsName cloudfailover.id.vn -Type NS -Server 1.1.1.1
+Resolve-DnsName YOUR_DOMAIN -Type NS -Server 1.1.1.1
 ```
 
-Kết quả phải có đủ `ns-1139.awsdns-14.org`, `ns-652.awsdns-17.net`, `ns-2042.awsdns-63.co.uk` và `ns-296.awsdns-37.com`; thứ tự và dấu chấm cuối có thể khác. Nếu còn NS cũ hoặc truy vấn lỗi, chưa nghiệm thu DNS: kiểm tra domain đã kích hoạt, bốn NS tại Mắt Bão đã lưu đúng và đợi cache/propagation cập nhật rồi thử lại. Không tạo lại hosted zone để xử lý cache. **Chỉ chuyển sang mục 4 khi bộ NS khớp.** Tạo zone trên AWS chưa chứng minh domain đã nối với Route 53. Tham khảo [AWS: nối domain với Route 53](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/dns-configuring-new-domain.html).
+Kết quả phải có đủ `ROUTE53_NS_1`, `ROUTE53_NS_2`, `ROUTE53_NS_3` và `ROUTE53_NS_4`; thứ tự và dấu chấm cuối có thể khác. Nếu còn NS cũ hoặc truy vấn lỗi, chưa nghiệm thu DNS: kiểm tra domain đã kích hoạt, bốn NS tại nhà đăng ký tên miền đã lưu đúng và đợi cache/propagation cập nhật rồi thử lại. Không tạo lại hosted zone để xử lý cache. **Chỉ chuyển sang mục 4 khi bộ NS khớp.** Tạo zone trên AWS chưa chứng minh domain đã nối với Route 53. Tham khảo [AWS: nối domain với Route 53](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/dns-configuring-new-domain.html).
 
 ## 4. AWS Console — tạo hai A record origin
 
-**Điều kiện bắt đầu:** domain đã kích hoạt, nameserver đã đổi tại Mắt Bão và kiểm tra NS ở mục 3.3 đã khớp Route 53.
+**Điều kiện bắt đầu:** domain đã kích hoạt, nameserver đã đổi tại nhà đăng ký tên miền và kiểm tra NS ở mục 3.3 đã khớp Route 53.
 
-Trong **Route 53 → Hosted zones → cloudfailover.id.vn → Create record**, tạo lần lượt hai record dưới đây. Nếu giao diện dùng wizard, chọn **Simple routing** rồi **Define simple record**; nếu dùng form thường, điền trực tiếp các trường. Tạo record AWS trước, bấm **Create records**, rồi lặp lại cho Azure:
+Trong **Route 53 → Hosted zones → YOUR_DOMAIN → Create record**, tạo lần lượt hai record dưới đây. Nếu giao diện dùng wizard, chọn **Simple routing** rồi **Define simple record**; nếu dùng form thường, điền trực tiếp các trường. Tạo record AWS trước, bấm **Create records**, rồi lặp lại cho Azure:
 
 | Trường       | AWS                         | Azure                       |
 | -------------- | --------------------------- | --------------------------- |
 | Record name    | `aws-origin`              | `azure-origin`            |
 | Record type    | **A — IPv4 address** | **A — IPv4 address** |
 | Alias          | **Off**               | **Off**               |
-| Value          | **`18.143.30.46`**  | **`172.198.68.77`** |
+| Value          | **`AWS_PUBLIC_IP`**  | **`AZURE_PUBLIC_IP`** |
 | TTL            | `60` giây cho lab        | `60` giây                |
 | Routing policy | **Simple routing**    | **Simple routing**    |
 
-Bấm **Create records**. Ở ô **Record name**, chỉ nhập `aws-origin` hoặc `azure-origin`; giao diện gắn phần đuôi `.cloudfailover.id.vn`. Kiểm tra tên đầy đủ trước khi lưu để tránh bị lặp domain. Ô **Value** dùng IP thật đã lấy ở mục 2.2, không nhập URL, port hoặc private IP. Sau khi lưu, danh sách phải có `aws-origin.cloudfailover.id.vn` và `azure-origin.cloudfailover.id.vn`: hai subdomain đã được tạo. Chưa thêm AAAA khi chưa triển khai IPv6.
+Bấm **Create records**. Ở ô **Record name**, chỉ nhập `aws-origin` hoặc `azure-origin`; giao diện gắn phần đuôi `.YOUR_DOMAIN`. Kiểm tra tên đầy đủ trước khi lưu để tránh bị lặp domain. Ô **Value** dùng IP thật đã lấy ở mục 2.2, không nhập URL, port hoặc private IP. Sau khi lưu, danh sách phải có `aws-origin.YOUR_DOMAIN` và `azure-origin.YOUR_DOMAIN`: hai subdomain đã được tạo. Chưa thêm AAAA khi chưa triển khai IPv6.
 
 **LAPTOP — PowerShell Windows:** chạy các lệnh dưới, không chạy trong SSH:
 
 ```powershell
-Resolve-DnsName aws-origin.cloudfailover.id.vn -Type A -Server 1.1.1.1
-Resolve-DnsName azure-origin.cloudfailover.id.vn -Type A -Server 1.1.1.1
-curl.exe --fail-with-body http://aws-origin.cloudfailover.id.vn/version
-curl.exe --fail-with-body http://azure-origin.cloudfailover.id.vn/version
+Resolve-DnsName aws-origin.YOUR_DOMAIN -Type A -Server 1.1.1.1
+Resolve-DnsName azure-origin.YOUR_DOMAIN -Type A -Server 1.1.1.1
+curl.exe --fail-with-body http://aws-origin.YOUR_DOMAIN/version
+curl.exe --fail-with-body http://azure-origin.YOUR_DOMAIN/version
 ```
 
 Mỗi tên phải trả đúng IP và environment. Nếu HTTP qua IP được nhưng qua tên không được, kiểm tra delegation/record/cache trước khi tiếp tục. GĐ5 không tạo CNAME simple cho `app`, nên GĐ6 không cần xóa record tạm do hướng dẫn này tạo.
@@ -268,7 +199,7 @@ Không bật UFW mới trong bước này khi chưa chuẩn bị rule SSH. Mở 
 
 ### 6.1. AWS CONSOLE — tạo policy một lần, dùng cho cả hai máy
 
-**IAM → Policies → Create policy → JSON**. Dán mẫu sau, thay `YOUR_ZONE_ID` trước khi lưu; cả ba hostname đã đúng với domain của bạn:
+**IAM → Policies → Create policy → JSON**. Dán mẫu sau, thay `HOSTED_ZONE_ID` và `YOUR_DOMAIN` bằng giá trị của bạn trước khi lưu:
 
 ```json
 {
@@ -287,14 +218,14 @@ Không bật UFW mới trong bước này khi chưa chuẩn bị rule SSH. Mở 
     {
       "Effect": "Allow",
       "Action": "route53:ChangeResourceRecordSets",
-      "Resource": "arn:aws:route53:::hostedzone/YOUR_ZONE_ID",
+      "Resource": "arn:aws:route53:::hostedzone/HOSTED_ZONE_ID",
       "Condition": {
         "ForAllValues:StringEquals": {
           "route53:ChangeResourceRecordSetsRecordTypes": ["TXT"],
           "route53:ChangeResourceRecordSetsNormalizedRecordNames": [
-            "_acme-challenge.app.cloudfailover.id.vn",
-            "_acme-challenge.aws-origin.cloudfailover.id.vn",
-            "_acme-challenge.azure-origin.cloudfailover.id.vn"
+            "_acme-challenge.app.YOUR_DOMAIN",
+            "_acme-challenge.aws-origin.YOUR_DOMAIN",
+            "_acme-challenge.azure-origin.YOUR_DOMAIN"
           ]
         }
       }
@@ -367,14 +298,14 @@ Danh sách plugin phải có `dns-route53`. Hướng dẫn dùng package Ubuntu;
 
 ### 7.2. CHỈ EC2 — cấp certificate dcs29-aws
 
-Hai hostname trong lệnh dưới đã đúng domain của bạn; chỉ thay `nhom@cloudfailover.id.vn` bằng email thật nhận được thư:
+Thay `YOUR_DOMAIN` bằng domain thật và `CERT_EMAIL` bằng email nhận thư trước khi chạy lệnh:
 
 ```bash
 sudo certbot certonly --dns-route53 \
   --cert-name dcs29-aws \
-  -d app.cloudfailover.id.vn \
-  -d aws-origin.cloudfailover.id.vn \
-  --email nhom@cloudfailover.id.vn --agree-tos --non-interactive
+  -d app.YOUR_DOMAIN \
+  -d aws-origin.YOUR_DOMAIN \
+  --email CERT_EMAIL --agree-tos --non-interactive
 sudo certbot certificates
 ```
 
@@ -387,14 +318,14 @@ Kỳ vọng certificate có hai SAN đúng và đường dẫn:
 
 ### 7.3. CHỈ AZURE — cấp certificate dcs29-azure
 
-Đợi cấp certificate EC2 xong. Trong **SSH Azure**, đảm bảo file credential mục 6.3 đã tạo và thay email mẫu bằng email thật/Gmail của bạn rồi chạy:
+Đợi cấp certificate EC2 xong. Trong **SSH Azure**, đảm bảo file credential mục 6.3 đã tạo; thay `YOUR_DOMAIN` và `CERT_EMAIL` bằng giá trị thật rồi chạy:
 
 ```bash
 sudo certbot certonly --dns-route53 \
   --cert-name dcs29-azure \
-  -d app.cloudfailover.id.vn \
-  -d azure-origin.cloudfailover.id.vn \
-  --email nhom@cloudfailover.id.vn --agree-tos --non-interactive
+  -d app.YOUR_DOMAIN \
+  -d azure-origin.YOUR_DOMAIN \
+  --email CERT_EMAIL --agree-tos --non-interactive
 sudo certbot certificates
 ```
 
@@ -445,12 +376,12 @@ Lưu **Ctrl+O → Enter → Ctrl+X** trên từng máy. Giữ image, restart pol
 
 ### 8.3. CHỈ EC2 — cấu hình NGINX AWS
 
-Trong **SSH EC2**, chạy `sudo nano /opt/dcs29/nginx.conf`, xóa nội dung cũ và dán cấu hình dưới vào nano. Dùng nguyên các hostname trong mẫu. Giai đoạn kiểm tra ban đầu giữ HTTP proxy; sẽ bật redirect ở mục 9.
+Trong **SSH EC2**, chạy `sudo nano /opt/dcs29/nginx.conf`, xóa nội dung cũ và dán cấu hình dưới vào nano. Thay `YOUR_DOMAIN` bằng domain thật trong mọi `server_name` và đường dẫn certificate trước khi lưu. Giai đoạn kiểm tra ban đầu giữ HTTP proxy; sẽ bật redirect ở mục 9.
 
 ```nginx
 server {
     listen 80;
-    server_name app.cloudfailover.id.vn aws-origin.cloudfailover.id.vn;
+    server_name app.YOUR_DOMAIN aws-origin.YOUR_DOMAIN;
     resolver 127.0.0.11 ipv6=off valid=5s;
 
     location / {
@@ -468,7 +399,7 @@ server {
 
 server {
     listen 443 ssl;
-    server_name app.cloudfailover.id.vn aws-origin.cloudfailover.id.vn;
+    server_name app.YOUR_DOMAIN aws-origin.YOUR_DOMAIN;
     ssl_certificate /etc/letsencrypt/live/dcs29-aws/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/dcs29-aws/privkey.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
@@ -500,12 +431,12 @@ Mở file:
 sudo nano /opt/dcs29/nginx.conf
 ```
 
-Xóa nội dung cũ, rồi dán toàn bộ cấu hình sau. Hostname và đường dẫn certificate đã điền đúng cho Azure:
+Xóa nội dung cũ, rồi dán toàn bộ cấu hình sau. Thay `YOUR_DOMAIN` bằng domain thật trong mọi `server_name` và đường dẫn certificate trước khi lưu:
 
 ```nginx
 server {
     listen 80;
-    server_name app.cloudfailover.id.vn azure-origin.cloudfailover.id.vn;
+    server_name app.YOUR_DOMAIN azure-origin.YOUR_DOMAIN;
     resolver 127.0.0.11 ipv6=off valid=5s;
 
     location / {
@@ -523,7 +454,7 @@ server {
 
 server {
     listen 443 ssl;
-    server_name app.cloudfailover.id.vn azure-origin.cloudfailover.id.vn;
+    server_name app.YOUR_DOMAIN azure-origin.YOUR_DOMAIN;
     ssl_certificate /etc/letsencrypt/live/dcs29-azure/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/dcs29-azure/privkey.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
@@ -573,10 +504,10 @@ Cần recreate vì đã thêm port/mount; chỉ reload không thêm được por
 Dùng `curl.exe` để tránh alias `curl` của Windows PowerShell. Không dùng `-k` hay `--insecure`:
 
 ```powershell
-curl.exe --fail-with-body https://aws-origin.cloudfailover.id.vn/health/ready
-curl.exe --fail-with-body https://aws-origin.cloudfailover.id.vn/version
-curl.exe --fail-with-body https://azure-origin.cloudfailover.id.vn/health/ready
-curl.exe --fail-with-body https://azure-origin.cloudfailover.id.vn/version
+curl.exe --fail-with-body https://aws-origin.YOUR_DOMAIN/health/ready
+curl.exe --fail-with-body https://aws-origin.YOUR_DOMAIN/version
+curl.exe --fail-with-body https://azure-origin.YOUR_DOMAIN/health/ready
+curl.exe --fail-with-body https://azure-origin.YOUR_DOMAIN/version
 ```
 
 Mở hai URL origin trên browser: có HTTPS hợp lệ, dashboard hiển thị đúng environment. `https://PUBLIC_IP` có thể báo mismatch vì certificate cấp cho tên miền, không phải IP; dùng hostname đúng.
@@ -586,27 +517,27 @@ Mở hai URL origin trên browser: có HTTPS hợp lệ, dashboard hiển thị 
 Chạy toàn bộ cụm dưới trong **cùng tab PowerShell laptop**, không chạy trong SSH EC2/Azure. Ba dòng đầu đặt biến, rồi mỗi lệnh curl kiểm tra một origin:
 
 ```powershell
-$SharedHost = "app.cloudfailover.id.vn"
-$AwsIp = "18.143.30.46"
-$AzureIp = "172.198.68.77"
+$SharedHost = "app.YOUR_DOMAIN"
+$AwsIp = "AWS_PUBLIC_IP"
+$AzureIp = "AZURE_PUBLIC_IP"
 
-# EC2 (18.143.30.46)
+# EC2 (AWS_PUBLIC_IP)
 curl.exe --fail-with-body --resolve "${SharedHost}:443:${AwsIp}" "https://${SharedHost}/version"
-# Azure (172.198.68.77)
+# Azure (AZURE_PUBLIC_IP)
 curl.exe --fail-with-body --resolve "${SharedHost}:443:${AzureIp}" "https://${SharedHost}/version"
-# EC2 (18.143.30.46)
+# EC2 (AWS_PUBLIC_IP)
 curl.exe --fail-with-body --resolve "${SharedHost}:443:${AwsIp}" "https://${SharedHost}/health/ready"
-# Azure (172.198.68.77)
+# Azure (AZURE_PUBLIC_IP)
 curl.exe --fail-with-body --resolve "${SharedHost}:443:${AzureIp}" "https://${SharedHost}/health/ready"
-# EC2 (18.143.30.46)
+# EC2 (AWS_PUBLIC_IP)
 curl.exe --fail-with-body --resolve "${SharedHost}:443:${AwsIp}" "https://${SharedHost}/api/devices"
-# Azure (172.198.68.77)
+# Azure (AZURE_PUBLIC_IP)
 curl.exe --fail-with-body --resolve "${SharedHost}:443:${AzureIp}" "https://${SharedHost}/api/devices"
 ```
 
 `--resolve` chỉ ép IP cho tiến trình curl; vẫn gửi đúng TLS SNI/Host và kiểm tra certificate. Không cần sửa hosts file. Chỉ thêm HTTP header `Host:` khi gọi HTTPS qua IP không thay được TLS SNI.
 
-Kỳ vọng: AWS trả `aws-primary`, Azure trả `azure-standby`; version/commit và **dataset SHA-256 đầy đủ** giống nhau. Giá trị đã ghi nhận trước đây là `version=sha-5b362a2321713ce8dfef45101bf37e834a21cc73`, `dataset_sha256=40242be543f3d25dc7d07a135ef1227c1006b3e60b0cb6e6610818ecd1fbbe9d`. Lấy output mới từ cả hai VM trong cùng lượt, không chỉ dựa vào ghi nhận cũ.
+Kỳ vọng: AWS trả `aws-primary`, Azure trả `azure-standby`; `commit_sha` và **dataset SHA-256 đầy đủ** giống nhau. Lấy output mới từ cả hai VM trong cùng lượt và đối chiếu với `COMMIT_SHA` của GĐ2.
 
 ### 9.3. Bật redirect — cấu hình riêng, lệnh áp dụng chung
 
@@ -627,7 +558,7 @@ Trong file, xóa toàn bộ block đầu tiên chứa `listen 80;`, từ `server
 ```nginx
 server {
     listen 80;
-    server_name app.cloudfailover.id.vn aws-origin.cloudfailover.id.vn;
+    server_name app.YOUR_DOMAIN aws-origin.YOUR_DOMAIN;
     return 301 https://$host$request_uri;
 }
 ```
@@ -637,7 +568,7 @@ server {
 ```nginx
 server {
     listen 80;
-    server_name app.cloudfailover.id.vn azure-origin.cloudfailover.id.vn;
+    server_name app.YOUR_DOMAIN azure-origin.YOUR_DOMAIN;
     return 301 https://$host$request_uri;
 }
 ```
@@ -679,27 +610,27 @@ Cả hai máy hoạt động rồi mới sang bước C.
 Mở tab PowerShell ở laptop, **không chạy trong SSH**. Chạy từng lệnh:
 
 ```powershell
-curl.exe -I http://aws-origin.cloudfailover.id.vn/version
+curl.exe -I http://aws-origin.YOUR_DOMAIN/version
 ```
 
 Kỳ vọng có:
 
 ```text
 HTTP/1.1 301 Moved Permanently
-Location: https://aws-origin.cloudfailover.id.vn/version
+Location: https://aws-origin.YOUR_DOMAIN/version
 ```
 
 Tiếp theo:
 
 ```powershell
-curl.exe -I http://azure-origin.cloudfailover.id.vn/version
+curl.exe -I http://azure-origin.YOUR_DOMAIN/version
 ```
 
 Kỳ vọng có:
 
 ```text
 HTTP/1.1 301 Moved Permanently
-Location: https://azure-origin.cloudfailover.id.vn/version
+Location: https://azure-origin.YOUR_DOMAIN/version
 ```
 
 Các header khác có thể khác mẫu; quan trọng là **301** và **Location đúng HTTPS, hostname, đường dẫn**. Lệnh `-I` chỉ đọc header, không tự đi theo redirect.
@@ -707,11 +638,11 @@ Các header khác có thể khác mẫu; quan trọng là **301** và **Location
 Để kiểm tra cả redirect và ứng dụng sau redirect, chạy:
 
 ```powershell
-curl.exe --fail-with-body -L http://aws-origin.cloudfailover.id.vn/version
+curl.exe --fail-with-body -L http://aws-origin.YOUR_DOMAIN/version
 ```
 
 ```powershell
-curl.exe --fail-with-body -L http://azure-origin.cloudfailover.id.vn/version
+curl.exe --fail-with-body -L http://azure-origin.YOUR_DOMAIN/version
 ```
 
 `-L` yêu cầu curl đi theo redirect. Kết quả phải là JSON `/version`: AWS trả `aws-primary`, Azure trả `azure-standby`, version/dataset vẫn khớp và không lỗi TLS. Có thể mở hai URL HTTP origin trên browser để thấy thanh địa chỉ chuyển sang HTTPS.
@@ -781,7 +712,7 @@ Phải có thông báo kiểm tra NGINX thành công và không có lỗi reload
 sudo certbot renew --cert-name dcs29-aws --dry-run
 ```
 
-Đợi EC2 hoàn tất thành công rồi chuyển sang Azure, không chạy đồng thời vì hai máy cùng xác thực TXT của `app.cloudfailover.id.vn`.
+Đợi EC2 hoàn tất thành công rồi chuyển sang Azure, không chạy đồng thời vì hai máy cùng xác thực TXT của `app.YOUR_DOMAIN`.
 
 **CHỈ AZURE:**
 
@@ -932,7 +863,7 @@ Rollback này quay về HTTP GĐ3/GĐ4 nếu backup lấy trước HTTPS. Không
 
 ### 12.2. TÙY CHỌN — evidence cho báo cáo
 
-Theo lựa chọn của bạn, có thể bỏ qua phần này; không ảnh hưởng ứng dụng đang chạy. Nếu sau này cần báo cáo, thu output trên từng VM và ảnh Console/Portal, rồi lưu ghi chú trên **laptop trong repo `experiments/`**. Không cần tạo thư mục repo trên VM. Nội dung có thể gồm:
+Để phục vụ báo cáo và lần triển khai lại, thu output trên từng VM và ảnh Console/Portal, rồi lưu ghi chú trên **laptop trong `experiments/`** sau khi che thông tin nhạy cảm. Không cần tạo thư mục repo trên VM. Nội dung có thể gồm:
 
 - Zone ID, delegation/NS, hai A record và TTL; screenshot không chứa secret.
 - AWS SG 443, Azure NSG 443 và Public IP tĩnh.

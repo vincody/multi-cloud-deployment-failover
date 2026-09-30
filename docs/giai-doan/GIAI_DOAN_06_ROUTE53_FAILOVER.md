@@ -1,32 +1,32 @@
 # Giai đoạn 6 — Route 53 health checks và DNS failover
 
-**Trạng thái (28/09/2026):** Đã xác nhận đường chính AWS → Azure → AWS bằng thử dừng app AWS. DNS authoritative đã trả `azure-origin` và endpoint chung trả `azure-standby` trong lúc AWS lỗi; sau khi AWS phục hồi, DNS authoritative trả `aws-origin` và endpoint chung trả `aws-primary`. Chưa có bằng chứng đã thử dừng app Azure riêng ở mục 4.3 hoặc đo timeline GD8. Evidence lưu file được bỏ qua theo lựa chọn của bạn.
-**Mục tiêu:** người dùng vào `https://app.cloudfailover.id.vn`, bình thường được AWS phục vụ; khi AWS unhealthy và Azure healthy, DNS chuyển sang Azure, rồi trở lại AWS khi AWS phục hồi.
+**Đầu vào:** GĐ5 đã pass HTTPS trên cả hai origin và `app.YOUR_DOMAIN` đã có certificate trên **cả hai VM**. Điền [bảng thông số](THONG_SO_TRIEN_KHAI.md), đặc biệt domain, hai IP và bốn NS của hosted zone mới. GĐ6 sẽ tạo health check và record failover trong chính AWS account chứa zone đó.
+**Mục tiêu:** người dùng vào `https://app.YOUR_DOMAIN`, bình thường được AWS phục vụ; khi AWS unhealthy và Azure healthy, DNS chuyển sang Azure, rồi trở lại AWS khi AWS phục hồi.
 
 > **Nếu vừa nghỉ và đã stop hai máy:** Start EC2 và Azure VM, đợi Running và kiểm tra HTTPS ở mục 2. Không cần cấp lại certificate hay tạo lại zone nếu cấu hình còn hoạt động. Trong toàn bộ bài thử, Azure phải đang chạy; máy standby tắt thì không thể phục vụ khi AWS lỗi.
 
-**Kết quả quan sát trực tiếp:** khi AWS app dừng, AWS origin trả 502 nhưng Azure origin và `app.cloudfailover.id.vn` trả 200, environment `azure-standby`. Sau phục hồi, hai origin readiness đều 200; khoảng một nhịp health check sau, Route 53 và endpoint chung trở lại `aws-primary`. Browser cũ có thể giữ kết nối AWS và tiếp tục thấy 502 cho tới khi mở browser mới. Đây là hành vi cache/connection cần nêu trong báo cáo, không phải record failover sai.
+**Kết quả cần tự quan sát:** khi app AWS dừng và Azure vẫn healthy, authoritative DNS chọn Azure và request mới tới hostname chung trả `azure-standby`; sau phục hồi DNS trở lại AWS. Thời gian và lỗi thực tế phụ thuộc health check, TTL, DNS cache và connection cũ; ghi số đo của lần chạy này ở GĐ8.
 
 ## 1. Hiểu mô hình và nơi thao tác
 
 ```text
-Người dùng → app.cloudfailover.id.vn
-               ├─ Primary CNAME   → aws-origin.cloudfailover.id.vn   → 18.143.30.46
-               └─ Secondary CNAME → azure-origin.cloudfailover.id.vn → 172.198.68.77
+Người dùng → app.YOUR_DOMAIN
+               ├─ Primary CNAME   → aws-origin.YOUR_DOMAIN   → AWS_PUBLIC_IP
+               └─ Secondary CNAME → azure-origin.YOUR_DOMAIN → AZURE_PUBLIC_IP
 
 Route 53 health check AWS   → HTTPS AWS origin /health/ready
 Route 53 health check Azure → HTTPS Azure origin /health/ready
 ```
 
-GD5 đã chuẩn bị TLS cho `app.cloudfailover.id.vn` trên cả hai VM. GD6 mới tạo DNS cho tên `app`. DNS đổi IP đích nhưng browser vẫn dùng hostname `app`, nên certificate của cả hai VM phải nhận tên đó.
+GD5 đã chuẩn bị TLS cho `app.YOUR_DOMAIN` trên cả hai VM. GD6 mới tạo DNS cho tên `app`. DNS đổi IP đích nhưng browser vẫn dùng hostname `app`, nên certificate của cả hai VM phải nhận tên đó.
 
 | Nhãn | Nơi thực hiện |
 |---|---|
 | AWS CONSOLE | Trình duyệt laptop, Route 53 trong tài khoản đang chứa hosted zone |
 | AZURE PORTAL | Trình duyệt laptop, chỉ để Start/kiểm tra VM nếu cần |
 | LAPTOP | PowerShell Windows ngoài SSH, kiểm tra DNS và gọi ứng dụng |
-| CHỈ EC2 | SSH Ubuntu EC2 `18.143.30.46`, gây lỗi/khôi phục AWS |
-| CHỈ AZURE | SSH Ubuntu Azure `172.198.68.77`, thử health Azure |
+| CHỈ EC2 | SSH Ubuntu EC2 `AWS_PUBLIC_IP`, gây lỗi/khôi phục AWS |
+| CHỈ AZURE | SSH Ubuntu Azure `AZURE_PUBLIC_IP`, thử health Azure |
 | CẢ HAI MÁY | Lệnh chung, thực hiện lần lượt trong SSH EC2 rồi SSH Azure |
 
 **Hai health check, kể cả check Azure, đều tạo trên AWS Route 53**, không tạo trên Azure Portal. Không cần sửa Compose/NGINX hay chạy lại Certbot trong GD6 nếu GD5 đã pass.
@@ -43,20 +43,20 @@ Route 53 là DNS, không phải reverse proxy. Nó không chuyển connection đ
 
 | Thông tin | AWS | Azure |
 |---|---|---|
-| Origin | `aws-origin.cloudfailover.id.vn` | `azure-origin.cloudfailover.id.vn` |
-| IPv4 đã cung cấp | `18.143.30.46` | `172.198.68.77` |
+| Origin | `aws-origin.YOUR_DOMAIN` | `azure-origin.YOUR_DOMAIN` |
+| IPv4 lấy từ GĐ3/GĐ4 | `AWS_PUBLIC_IP` | `AZURE_PUBLIC_IP` |
 | `/version` environment | `aws-primary` | `azure-standby` |
 | Certificate từ GD5 | `dcs29-aws` | `dcs29-azure` |
 
 Trên **PowerShell laptop**, chạy lần lượt:
 
 ```powershell
-Resolve-DnsName aws-origin.cloudfailover.id.vn -Type A -Server 1.1.1.1
-Resolve-DnsName azure-origin.cloudfailover.id.vn -Type A -Server 1.1.1.1
-curl.exe --fail-with-body https://aws-origin.cloudfailover.id.vn/health/ready
-curl.exe --fail-with-body https://azure-origin.cloudfailover.id.vn/health/ready
-curl.exe --fail-with-body https://aws-origin.cloudfailover.id.vn/version
-curl.exe --fail-with-body https://azure-origin.cloudfailover.id.vn/version
+Resolve-DnsName aws-origin.YOUR_DOMAIN -Type A -Server 1.1.1.1
+Resolve-DnsName azure-origin.YOUR_DOMAIN -Type A -Server 1.1.1.1
+curl.exe --fail-with-body https://aws-origin.YOUR_DOMAIN/health/ready
+curl.exe --fail-with-body https://azure-origin.YOUR_DOMAIN/health/ready
+curl.exe --fail-with-body https://aws-origin.YOUR_DOMAIN/version
+curl.exe --fail-with-body https://azure-origin.YOUR_DOMAIN/version
 ```
 
 DNS trả đúng IP, readiness thành công, environment đúng cloud, version/commit/dataset đầy đủ khớp. Không dùng `-k` để bỏ TLS verify.
@@ -74,9 +74,9 @@ sudo docker compose ps
 **LAPTOP**, cùng tab PowerShell:
 
 ```powershell
-$SharedHost = "app.cloudfailover.id.vn"
-$AwsIp = "18.143.30.46"
-$AzureIp = "172.198.68.77"
+$SharedHost = "app.YOUR_DOMAIN"
+$AwsIp = "AWS_PUBLIC_IP"
+$AzureIp = "AZURE_PUBLIC_IP"
 curl.exe --fail-with-body --resolve "${SharedHost}:443:${AwsIp}" "https://${SharedHost}/version"
 curl.exe --fail-with-body --resolve "${SharedHost}:443:${AzureIp}" "https://${SharedHost}/version"
 ```
@@ -95,13 +95,13 @@ Health checks là tài nguyên có phí, gồm các tùy chọn bổ sung như H
 
 1. Mở **AWS Console → Route 53 → Health checks → Create health check**.
 2. Nếu đã có check đúng cấu hình, mở kiểm tra thay vì tạo trùng. Giao diện Route 53 có thể là bản mới hoặc cũ, tên trường hơi khác.
-3. **Theo đúng giao diện trong `errors_fix/image.png` của bạn:** chọn **Resource = Endpoint → Specify endpoint by = Domain name**. Ở hàng **Domain name**, bên trái là menu **HTTPS**, bên phải là ô đang chứa `aws-origin.cloudfailover.id.vn` trong ảnh. Không có ô Path riêng trong phần ảnh bạn gửi. Chọn HTTPS, rồi sửa **ô bên phải menu HTTPS** thành:
+3. Chọn **Resource = Endpoint → Specify endpoint by = Domain name**. Nếu giao diện có một ô bên phải menu **HTTPS**, nhập hostname origin AWS, port và path như sau (sau khi thay `YOUR_DOMAIN`):
 
    ```text
-   aws-origin.cloudfailover.id.vn:443/health/ready
+   aws-origin.YOUR_DOMAIN:443/health/ready
    ```
 
-   Ảnh mới ở `errors_fix/zen_fsWRZYukwM.png` minh họa trực tiếp cho **Domain name** bằng `www.example.com:443/images`. Vì vậy dùng cùng mẫu `hostname:443/path`. Không thêm `https://` vì đã chọn HTTPS ở menu bên trái; không nhập `app.cloudfailover.id.vn` vì tên chung này sẽ đổi đích khi failover. Đây là cách điền cho **UI một ô trong ảnh**, không áp dụng cho UI cũ có ô Domain name và Path riêng. Trong giao diện một ô này phải ghi rõ `:443` theo đúng ví dụ AWS; nếu dùng giao diện cũ có ô Port riêng, điền `443` vào ô đó.
+   Mẫu là `hostname:443/path`. Không thêm `https://` khi menu đã chọn HTTPS; không nhập `app.YOUR_DOMAIN` vì tên chung sẽ đổi đích khi failover. Nếu Console có ô **Domain name**, **Port** và **Path** riêng, nhập lần lượt hostname origin, `443` và `/health/ready`.
 
    | Trường/điều cần kiểm tra | Giá trị AWS |
    |---|---|
@@ -109,10 +109,10 @@ Health checks là tài nguyên có phí, gồm các tùy chọn bổ sung như H
    | Resource | **Endpoint** |
    | Specify endpoint by | **Domain name** |
    | Protocol trong menu | **HTTPS** |
-   | Ô bên phải menu HTTPS trong ảnh | `aws-origin.cloudfailover.id.vn:443/health/ready` |
+   | Ô bên phải menu HTTPS nếu giao diện gộp trường | `aws-origin.YOUR_DOMAIN:443/health/ready` |
    | Port | `443`, nằm giữa hostname và path trong cùng ô |
 
-   **Nếu Console của bạn hiển thị UI khác:** ô Domain name riêng chỉ nhập `aws-origin.cloudfailover.id.vn`, ô Path/Resource path riêng nhập `/health/ready`. Không nhập URL đầy đủ `https://...` vào ô chỉ nhận hostname.
+   **Nếu Console của bạn hiển thị UI khác:** ô Domain name riêng chỉ nhập `aws-origin.YOUR_DOMAIN`, ô Path/Resource path riêng nhập `/health/ready`. Không nhập URL đầy đủ `https://...` vào ô chỉ nhận hostname.
 4. Mở **Advanced configuration / Additional settings**:
 
 | Trường | Chọn |
@@ -120,32 +120,32 @@ Health checks là tài nguyên có phí, gồm các tùy chọn bổ sung như H
 | Request interval | **Standard / 30 seconds** |
 | Failure threshold | `3` |
 | Enable SNI | **Bật** |
-| Host name nếu có ô riêng | `aws-origin.cloudfailover.id.vn` |
+| Host name nếu có ô riêng | `aws-origin.YOUR_DOMAIN` |
 | String matching / Search string | **Tắt**, để trống |
 | Latency measurement / Latency graphs | **Tắt** |
 | Health checker regions | Giữ recommended/default |
 | Invert health check status | **Tắt** |
 | Disabled | **Tắt**, check phải được enabled |
 
-5. Trước khi tạo, xem phần review/preview nếu có: endpoint phải là HTTPS đến `aws-origin.cloudfailover.id.vn` và path `/health/ready`, không phải `/`. Nếu preview không hiển thị path, sau khi tạo mở chi tiết check → cấu hình endpoint để xác nhận **Resource path = `/health/ready`**. Nếu AWS lưu path là `/`, sửa health check ngay trước khi tạo record failover; không coi check healthy là đủ vì `/` cũng có thể trả 200. Nếu có bước **Create alarm**, chọn **No / Không tạo alarm** trong GD6. Chọn **Next/Create health check** theo giao diện.
+5. Trước khi tạo, xem phần review/preview nếu có: endpoint phải là HTTPS đến `aws-origin.YOUR_DOMAIN` và path `/health/ready`, không phải `/`. Nếu preview không hiển thị path, sau khi tạo mở chi tiết check → cấu hình endpoint để xác nhận **Resource path = `/health/ready`**. Nếu AWS lưu path là `/`, sửa health check ngay trước khi tạo record failover; không coi check healthy là đủ vì `/` cũng có thể trả 200. Nếu có bước **Create alarm**, chọn **No / Không tạo alarm** trong GD6. Chọn **Next/Create health check** theo giao diện.
 6. Mở check vừa tạo, ghi **Health check ID** vào ghi chú cá nhân (không phải Hosted zone ID). Đợi trạng thái cập nhật, không kết luận lỗi ngay khi vừa tạo.
 
-Nếu Console đang dùng form **IP address**: IP AWS là `18.143.30.46`, vẫn phải có hostname origin trong ô Host name/Domain name và bật SNI; không dùng IP làm TLS hostname. Chỉ chọn một cách cấu hình và ghi lại cách đã chọn.
+Nếu Console đang dùng form **IP address**: IP AWS là `AWS_PUBLIC_IP`, vẫn phải có hostname origin trong ô Host name/Domain name và bật SNI; không dùng IP làm TLS hostname. Chỉ chọn một cách cấu hình và ghi lại cách đã chọn.
 
 Tham khảo [AWS: tạo health check](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/health-checks-creating.html) và [các trường cấu hình](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/health-checks-creating-values.html).
 
 ### 3.2. Health check Azure — cũng tạo trên AWS Console
 
-Vẫn trong **Route 53 → Health checks → Create health check**. Với UI một ô như ảnh, chọn HTTPS và nhập `azure-origin.cloudfailover.id.vn:443/health/ready` vào ô bên phải menu HTTPS. Lặp lại mục 3.1 với **các giá trị khác** sau:
+Vẫn trong **Route 53 → Health checks → Create health check**. Với UI một ô như ảnh, chọn HTTPS và nhập `azure-origin.YOUR_DOMAIN:443/health/ready` vào ô bên phải menu HTTPS. Lặp lại mục 3.1 với **các giá trị khác** sau:
 
 | Trường | Giá trị Azure |
 |---|---|
 | Name | `dcs29-azure-https-ready` |
-| Ô Domain name của UI một ô trong ảnh | `azure-origin.cloudfailover.id.vn:443/health/ready` |
-| Host name nếu có ô riêng | `azure-origin.cloudfailover.id.vn` |
-| IP nếu chọn form IP address | `172.198.68.77` |
+| Ô Domain name của UI một ô trong ảnh | `azure-origin.YOUR_DOMAIN:443/health/ready` |
+| Host name nếu có ô riêng | `azure-origin.YOUR_DOMAIN` |
+| IP nếu chọn form IP address | `AZURE_PUBLIC_IP` |
 
-**Các giá trị còn lại giống AWS:** HTTPS, 443, `/health/ready`, interval 30, threshold 3, SNI bật; string matching/latency/alarm/invert tắt. Lưu check, mở chi tiết để xác nhận **Resource path = `/health/ready`**, rồi ghi Health check ID Azure riêng. Nếu UI cũ có ô riêng, Domain name chỉ là `azure-origin.cloudfailover.id.vn`, Path là `/health/ready`.
+**Các giá trị còn lại giống AWS:** HTTPS, 443, `/health/ready`, interval 30, threshold 3, SNI bật; string matching/latency/alarm/invert tắt. Lưu check, mở chi tiết để xác nhận **Resource path = `/health/ready`**, rồi ghi Health check ID Azure riêng. Nếu UI cũ có ô riêng, Domain name chỉ là `azure-origin.YOUR_DOMAIN`, Path là `/health/ready`.
 
 ### 3.3. Chỉ tiếp tục khi cả hai healthy
 
@@ -173,8 +173,8 @@ sudo docker compose ps
 Trên **LAPTOP**:
 
 ```powershell
-curl.exe --fail-with-body --connect-timeout 5 --max-time 10 https://aws-origin.cloudfailover.id.vn/health/ready
-curl.exe --fail-with-body https://azure-origin.cloudfailover.id.vn/health/ready
+curl.exe --fail-with-body --connect-timeout 5 --max-time 10 https://aws-origin.YOUR_DOMAIN/health/ready
+curl.exe --fail-with-body https://azure-origin.YOUR_DOMAIN/health/ready
 ```
 
 AWS phải thất bại (thường 502 vì app dừng); Azure vẫn thành công. AWS Console → Health checks: đợi AWS unhealthy, Azure vẫn healthy. Không suy thời gian chắc chắn là 30 × 3 = 90 giây; phải quan sát thực tế.
@@ -216,7 +216,7 @@ sudo docker compose ps
 
 ### 5.1. Kiểm tra xung đột trước khi tạo
 
-**Route 53 → Hosted zones → cloudfailover.id.vn → Records**, lọc tên `app.cloudfailover.id.vn`.
+**Route 53 → Hosted zones → YOUR_DOMAIN → Records**, lọc tên `app.YOUR_DOMAIN`.
 
 Theo GD5 chưa có DNS record `app`, nên thường không có gì cần xóa. Nếu có record A/AAAA/CNAME simple cũ cho `app`, lưu cấu hình cũ trước và xác định nó có đang dùng không. CNAME không được cùng tồn tại với A/AAAA ở cùng tên; simple CNAME cũng không trộn với cặp failover. Chỉ thay record `app` liên quan, không xóa NS/SOA hoặc A record hai origin.
 
@@ -226,10 +226,10 @@ Chọn **Create record**; nếu mở wizard, chọn **Failover routing**. Form t
 
 | Trường | Giá trị |
 |---|---|
-| Record name | `app` (giao diện thêm `.cloudfailover.id.vn`) |
+| Record name | `app` (giao diện thêm `.YOUR_DOMAIN`) |
 | Record type | **CNAME** |
 | Alias | **Off** |
-| Value | `aws-origin.cloudfailover.id.vn` |
+| Value | `aws-origin.YOUR_DOMAIN` |
 | TTL | `30` giây |
 | Routing policy | **Failover** |
 | Failover record type / Role | **Primary** |
@@ -246,31 +246,31 @@ Chọn **Create record** lần nữa, điền các giá trị giống Primary ng
 | Trường | Giá trị |
 |---|---|
 | Record name | Vẫn là `app` |
-| Value | `azure-origin.cloudfailover.id.vn` |
+| Value | `azure-origin.YOUR_DOMAIN` |
 | Failover record type / Role | **Secondary** |
 | Record ID / Set identifier | `azure-secondary` |
 | Health check | `dcs29-azure-https-ready` / đúng ID Azure |
 
 Type vẫn **CNAME**, Alias **Off**, TTL **30**, Routing **Failover**, gắn health check **Yes**. Không đặt record name là `app-azure`; hai record phải cùng tên để Route 53 lựa chọn.
 
-Bấm **Create records**. Danh sách cuối phải có **hai dòng CNAME cùng tên `app.cloudfailover.id.vn`**, khác role/identifier/value/check. Đây là hợp lệ với routing Failover. Không phải hai A record của origin; chúng vẫn giữ ở zone. Xem [AWS: giá trị failover record](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/resource-record-sets-values-failover.html).
+Bấm **Create records**. Danh sách cuối phải có **hai dòng CNAME cùng tên `app.YOUR_DOMAIN`**, khác role/identifier/value/check. Đây là hợp lệ với routing Failover. Không phải hai A record của origin; chúng vẫn giữ ở zone. Xem [AWS: giá trị failover record](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/resource-record-sets-values-failover.html).
 
 ## 6. LAPTOP — kiểm tra bình thường, traffic vào AWS
 
 Hai check phải healthy. Trên **PowerShell laptop**:
 
 ```powershell
-$SharedHost = "app.cloudfailover.id.vn"
-$AuthoritativeNs = "ns-1139.awsdns-14.org"
+$SharedHost = "app.YOUR_DOMAIN"
+$AuthoritativeNs = "ROUTE53_NS_1"
 Resolve-DnsName $SharedHost -Type CNAME -Server $AuthoritativeNs -DnsOnly
 Resolve-DnsName $SharedHost -Type A -Server 1.1.1.1
 curl.exe --fail-with-body "https://${SharedHost}/health/ready"
 curl.exe --fail-with-body "https://${SharedHost}/version"
 ```
 
-Kỳ vọng CNAME là `aws-origin.cloudfailover.id.vn`, IP A theo chuỗi CNAME là `18.143.30.46`, `/version` báo `aws-primary`. Nếu query `app` trước khi record tồn tại, resolver có thể còn cache NXDOMAIN; authoritative query giúp phân biệt với record chưa được tạo.
+Kỳ vọng CNAME là `aws-origin.YOUR_DOMAIN`, IP A theo chuỗi CNAME là `AWS_PUBLIC_IP`, `/version` báo `aws-primary`. Nếu query `app` trước khi record tồn tại, resolver có thể còn cache NXDOMAIN; authoritative query giúp phân biệt với record chưa được tạo.
 
-Mở **https://app.cloudfailover.id.vn** trên browser: dashboard dùng AWS, không lỗi TLS. Không dùng `--resolve` ở bước này vì đang kiểm tra DNS routing thật.
+Mở **https://app.YOUR_DOMAIN** trên browser: dashboard dùng AWS, không lỗi TLS. Không dùng `--resolve` ở bước này vì đang kiểm tra DNS routing thật.
 
 ### Quy tắc chọn record với hai check đã gắn
 
@@ -294,7 +294,7 @@ Mở tab PowerShell riêng trên laptop, copy cả cụm:
 while ($true) {
     $ProbeAt = (Get-Date).ToUniversalTime().ToString("o")
     try {
-        $Result = Invoke-RestMethod -Uri "https://app.cloudfailover.id.vn/version" -TimeoutSec 5
+        $Result = Invoke-RestMethod -Uri "https://app.YOUR_DOMAIN/version" -TimeoutSec 5
         Write-Host "$ProbeAt OK environment=$($Result.environment) version=$($Result.version)"
     } catch {
         Write-Host "$ProbeAt FAIL $($_.Exception.Message)"
@@ -322,13 +322,13 @@ Ghi giờ nếu muốn đo. Không stop Azure, không dừng NGINX, không sửa
 Trong tab PowerShell thứ hai, chạy từng lệnh:
 
 ```powershell
-Resolve-DnsName app.cloudfailover.id.vn -Type CNAME -Server ns-1139.awsdns-14.org -DnsOnly
-Resolve-DnsName app.cloudfailover.id.vn -Type A -Server 1.1.1.1
-curl.exe --fail-with-body --connect-timeout 5 --max-time 10 https://app.cloudfailover.id.vn/version
-curl.exe --fail-with-body https://azure-origin.cloudfailover.id.vn/health/ready
+Resolve-DnsName app.YOUR_DOMAIN -Type CNAME -Server ROUTE53_NS_1 -DnsOnly
+Resolve-DnsName app.YOUR_DOMAIN -Type A -Server 1.1.1.1
+curl.exe --fail-with-body --connect-timeout 5 --max-time 10 https://app.YOUR_DOMAIN/version
+curl.exe --fail-with-body https://azure-origin.YOUR_DOMAIN/health/ready
 ```
 
-Kỳ vọng sau health detection: authoritative CNAME chuyển sang `azure-origin.cloudfailover.id.vn`, sau cache DNS client chuyển IP tới `172.198.68.77`, probe/curl trả `azure-standby`. Certificate vẫn hợp lệ cho `app`; version/dataset vẫn khớp AWS.
+Kỳ vọng sau health detection: authoritative CNAME chuyển sang `azure-origin.YOUR_DOMAIN`, sau cache DNS client chuyển IP tới `AZURE_PUBLIC_IP`, probe/curl trả `azure-standby`. Certificate vẫn hợp lệ cho `app`; version/dataset vẫn khớp AWS.
 
 Nếu authoritative đã là Azure nhưng client còn lỗi AWS, chờ TTL/cache, thử request curl mới và đối chiếu resolver; chưa kết luận failover hỏng. Trong lượt đo không flush DNS vì sẽ thay hành vi cache cần quan sát. Có thể ghi nhận 10 response Azure thành công liên tiếp để xác nhận đã ổn định.
 
@@ -345,14 +345,14 @@ sudo docker compose ps
 **LAPTOP:**
 
 ```powershell
-curl.exe --fail-with-body https://aws-origin.cloudfailover.id.vn/health/ready
+curl.exe --fail-with-body https://aws-origin.YOUR_DOMAIN/health/ready
 ```
 
 Đợi AWS check healthy trên Console. Sau đó **LAPTOP**:
 
 ```powershell
-Resolve-DnsName app.cloudfailover.id.vn -Type CNAME -Server ns-1139.awsdns-14.org -DnsOnly
-curl.exe --fail-with-body https://app.cloudfailover.id.vn/version
+Resolve-DnsName app.YOUR_DOMAIN -Type CNAME -Server ROUTE53_NS_1 -DnsOnly
+curl.exe --fail-with-body https://app.YOUR_DOMAIN/version
 ```
 
 DNS authoritative quay về AWS; curl/probe sau cache trả `aws-primary`. Dừng probe **Ctrl+C**, xác nhận hai origin/health checks đều healthy trước khi kết thúc.
@@ -373,7 +373,7 @@ GD6 mới thử **app process failure**. GD8 sẽ stop **toàn EC2** để chứ
 | Domain chung trả Azure ngay bình thường | Primary unhealthy hoặc hai check gắn đảo; kiểm tra role/value/ID trong zone |
 | Authoritative đã Azure nhưng laptop còn AWS | Recursive cache/OS/browser/connection reuse; TTL không buộc mọi client đổi ngay |
 | Failback chưa thấy ngay | AWS readiness và health check đã healthy chưa, rồi mới xét cache |
-| Shared domain HTTPS mismatch | NGINX/certificate VM đang được chọn chưa chứa `app.cloudfailover.id.vn`; sửa GD5 |
+| Shared domain HTTPS mismatch | NGINX/certificate VM đang được chọn chưa chứa `app.YOUR_DOMAIN`; sửa GD5 |
 
 Không giảm threshold hoặc disable check để làm nó có vẻ healthy. Không đoán failover mất đúng interval × threshold: có nhiều health checker và nhiều lớp cache. Nếu cần số đo, ghi thời điểm stop, lỗi đầu tiên, check unhealthy, DNS đổi, response Azure đầu tiên và 10 response ổn định; GD8 sẽ chuẩn hóa phép đo.
 
@@ -389,14 +389,14 @@ Bật lại cả hai trước buổi làm tiếp, kiểm tra origin readiness v�
 
 1. Khôi phục app AWS nếu đã stop bằng mục 8; giữ Azure hoạt động.
 2. Xác nhận HTTPS AWS origin pass trước khi đưa người dùng về AWS.
-3. Nếu cần tạm bỏ failover: lưu cấu hình hai record `app` rồi xóa **đúng hai CNAME failover `app`**, tạo một CNAME **Simple** cùng tên `app`, Value `aws-origin.cloudfailover.id.vn`, TTL 30. Không xóa hai A origin, NS hoặc SOA.
+3. Nếu cần tạm bỏ failover: lưu cấu hình hai record `app` rồi xóa **đúng hai CNAME failover `app`**, tạo một CNAME **Simple** cùng tên `app`, Value `aws-origin.YOUR_DOMAIN`, TTL 30. Không xóa hai A origin, NS hoặc SOA.
 4. Kiểm tra DNS và HTTPS domain chung. Simple record không còn chuyển cloud tự động; muốn thử lại phải khôi phục cặp failover và gắn đúng checks.
 
-Chỉ sửa record ở AWS Console; không rollback HTTPS GD5 hoặc đổi nameserver Mắt Bão khi lỗi chỉ nằm ở routing GD6. Health check sai thì sửa target/path/SNI; không dùng `Disable` như cách chặn traffic vì semantics của check disabled khác endpoint lỗi.
+Chỉ sửa record ở AWS Console; không rollback HTTPS GD5 hoặc đổi nameserver tại nhà đăng ký domain khi lỗi chỉ nằm ở routing GD6. Health check sai thì sửa target/path/SNI; không dùng `Disable` như cách chặn traffic vì semantics của check disabled khác endpoint lỗi.
 
 ### 10.3. Evidence cho báo cáo — có thể bỏ qua ở lượt hướng dẫn
 
-Theo lựa chọn hiện tại của bạn, không bắt buộc lưu file evidence để ứng dụng chạy. Khi cần báo cáo, ghi trên laptop vào `experiments/`:
+Để báo cáo có thể kiểm chứng, ghi kết quả mới trên laptop vào `experiments/` sau khi che thông tin nhạy cảm:
 
 - Hai Health check IDs, cấu hình và screenshot healthy/unhealthy.
 - Hai failover records, TTL/role/check và bộ NS đang dùng.

@@ -2,7 +2,7 @@
 
 Xem [sơ đồ kiến trúc và workflow demo](../../images/ARCHITECTURE.md) để đối chiếu vị trí Azure VM trong hệ thống hai cloud.
 
-**Trạng thái (24/09/2026):** sau lần tạo Azure Container Apps thất bại do policy region, nhóm đã chuyển sang Ubuntu VM. Trang và các API trên Public IP Azure đã truy cập được; `/version` trả `azure-standby`, đúng commit và fingerprint dữ liệu dự kiến. Người triển khai xác nhận **VM → Overview → Location = India South Central**. Sau khi sửa Compose, `/version` và `/api/status` đã trả `region=indiasouthcentral`; xem [kết quả kiểm tra thực tế ở mục 9](#9-kiểm-tra-và-so-sánh-với-aws). Digest đang chạy, cấu hình NSG/Public IP và khả năng tự chạy lại sau reboot vẫn cần xác nhận riêng.
+**Cách dùng:** trước khi bắt đầu, ghi `GHCR_IMAGE`, `IMAGE_DIGEST`, `AZURE_REGION` vào [bảng thông số](THONG_SO_TRIEN_KHAI.md). Sau khi tạo VM, ghi `AZURE_PUBLIC_IP`. Mỗi ký hiệu phải được thay bằng giá trị mới của chính lần triển khai này trước khi chạy lệnh.
 
 ## 1. Mô hình và vùng triển khai
 
@@ -11,15 +11,15 @@ Internet → Public IP tĩnh → Network Security Group (80) → Azure VM Ubuntu
                                                     └─ Docker Compose: NGINX (80) → FastAPI (8080 nội bộ)
 ```
 
-Subscription Azure for Students hiện cho phép các region: `koreacentral`, `malaysiawest`, `indiasouthcentral`, `japaneast`, `eastasia`. VM hiện tại ở **India South Central (`indiasouthcentral`)**; các giá trị ví dụ bên dưới dùng vùng này. Nếu tạo VM ở vùng khác trong danh sách, đổi `APP_REGION` theo **Location thực của VM**. VM, VNet, NIC, NSG, Public IP và disk phải dùng vùng được policy cho phép. Region của Resource Group là metadata; nếu `dcs29-rg` đã tồn tại sau lần tạo Container Apps lỗi, kiểm tra tài nguyên bên trong rồi dùng lại, không xóa chỉ vì Resource Group ở vùng khác. [Microsoft: VM quota](https://learn.microsoft.com/en-us/azure/virtual-machines/quotas).
+Subscription, policy và quota quyết định region/VM size có thể dùng. Chọn một region được phép và ghi **mã** thành `AZURE_REGION`; đặt `APP_REGION` bằng **Location thực của VM**. VM, VNet, NIC, NSG, Public IP và disk phải dùng vùng phù hợp. Region của Resource Group chỉ là metadata; nếu `dcs29-rg` đã tồn tại, kiểm tra tài nguyên bên trong rồi mới dùng lại. [Microsoft: VM quota](https://learn.microsoft.com/en-us/azure/virtual-machines/quotas).
 
 GĐ4 dùng **HTTP cổng 80** để kiểm tra origin như AWS GĐ3; domain chung và HTTPS thuộc GĐ5. Để chứng minh DNS failover trong GĐ6, **cả AWS và Azure VM phải đang chạy, healthy trước khi gây lỗi AWS**. Có thể deallocate Azure VM ngoài giờ demo nhưng lúc đó nó không làm standby tự động.
 
 ## 2. Kiểm tra trước khi tạo
 
-1. Mở **Subscriptions**, xác nhận đang chọn đúng Azure for Students. Vào **Policy → Assignments → Allowed resource deployment regions → Parameters** để đối chiếu 5 region trên. Với subscription khác, lấy danh sách của subscription đó.
-2. Mở **Resource groups → dcs29-rg** nếu đã có, kiểm tra lần triển khai Container Apps thất bại có để lại app, environment, Log Analytics workspace hay tài nguyên nào khác. Chỉ xóa tài nguyên tạo lỗi sau khi xác nhận chúng không được dùng; không xóa cả Resource Group khi có tài nguyên của nhóm.
-3. Mở **Subscriptions → Usage + quotas**, lọc **East Asia**, kiểm tra quota vCPU cho dòng B và kích thước VM dự định. Portal còn có thể báo thiếu capacity dù quota đủ; khi đó thử size/region khác được policy cho phép. [Microsoft: quota và capacity](https://learn.microsoft.com/en-us/azure/virtual-machines/quotas).
+1. Mở **Subscriptions**, xác nhận subscription bạn sẽ dùng. Nếu có policy **Allowed resource deployment regions**, xem danh sách vùng được phép của chính subscription đó.
+2. Mở **Resource groups → dcs29-rg** nếu đã có; xác nhận quyền sở hữu và tài nguyên bên trong. Không xóa Resource Group đang dùng.
+3. Mở **Subscriptions → Usage + quotas**, lọc `AZURE_REGION`, kiểm tra quota vCPU và kích thước VM dự định. Portal còn có thể báo thiếu capacity dù quota đủ; khi đó thử size/region khác được policy cho phép và cập nhật `AZURE_REGION`. [Microsoft: quota và capacity](https://learn.microsoft.com/en-us/azure/virtual-machines/quotas).
 4. Dự tính phí VM, managed disk và Public IP trong [Azure Pricing Calculator](https://azure.microsoft.com/en-us/pricing/calculator/). Sau khi tạo Resource Group ở mục 3, có thể đặt budget cảnh báo chi phí; budget không tự dừng VM.
 
 ## 3. Tạo Resource Group
@@ -28,9 +28,9 @@ Trong Azure Portal, tìm **Resource groups → Create**. Điền:
 
 | Trường          | Giá trị                                                                                                                       |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| Subscription      | Azure for Students đã kiểm tra ở mục 2                                                                                     |
+| Subscription      | Subscription của bạn đã kiểm tra ở mục 2 |
 | Resource group    | `dcs29-rg`                                                                                                                    |
-| Region            | **East Asia** (`eastasia`), cùng vùng dự kiến tạo VM; nếu chọn vùng dự phòng thì điền vùng thực tế đó |
+| Region            | Có thể chọn `AZURE_REGION`; ghi lựa chọn thực tế của Resource Group |
 | Tags (nếu dùng) | `Project=dcs29`, `Owner=<tên nhóm>`; không đưa username cá nhân vào tài liệu/ảnh                                 |
 
 Chọn **Review + create → Create**, đợi thông báo tạo thành công, rồi vào **Resource groups → dcs29-rg** để xác nhận nhóm tài nguyên xuất hiện. Nếu `dcs29-rg` **đã tồn tại**, mở nó và kiểm tra subscription, danh sách tài nguyên; **không tạo thêm nhóm trùng tên hoặc xóa nhóm đang dùng**. Resource Group có thể ở vùng khác với VM vì vùng của nó lưu metadata; VM và tài nguyên mạng/ổ đĩa vẫn phải tạo ở vùng được policy cho phép. [Microsoft: tạo Resource Group trong Portal](https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/manage-resource-groups-portal).
@@ -43,10 +43,10 @@ Vào **Virtual machines → Create → Azure virtual machine**. Điền các tab
 
 | Tab/trường                             | Giá trị cho demo                                                                                                                                                         |
 | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Basics → Subscription                   | Azure for Students đã kiểm tra                                                                                                                                          |
+| Basics → Subscription                   | Subscription của bạn đã kiểm tra |
 | Basics → Resource group                 | Chọn`dcs29-rg` đã tạo/kiểm tra ở mục 3                                                                                                                            |
 | Basics → Virtual machine name           | `dcs29-azure-vm`                                                                                                                                                         |
-| Basics → Region                         | **India South Central** (`indiasouthcentral`) như VM hiện tại; nếu chọn vùng khác, ghi lại mã vùng để đặt `APP_REGION` đúng ở mục 7                                           |
+| Basics → Region                         | Vùng được phép đã ghi là `AZURE_REGION`; nếu đổi vùng, cập nhật bảng thông số và `APP_REGION` ở mục 7 |
 | Basics → Availability options           | **No infrastructure redundancy required** cho demo một VM                                                                                                           |
 | Basics → Security type                  | **Standard** nếu tùy chọn khác gây hạn chế/quota; ghi lựa chọn thực tế                                                                                    |
 | Basics → Image                          | **Ubuntu Server 24.04 LTS x64**; cần x86-64 vì image GHCR GĐ2 là `linux/amd64`                                                                                 |
@@ -69,14 +69,14 @@ Tab **Networking** khi tạo VM có các trường **Virtual network**, **Subnet
 
 | Trường trên Portal | Chọn gì | Sau khi tạo cần làm gì |
 |---|---|---|
-| **Virtual network** | Có thể để VNet mới Portal đề xuất, ví dụ `vnet-indiasouthcentral-1` | VNet phải cùng region với **VM**; region của Resource Group có thể khác. |
-| **Subnet** | Để subnet mới trong VNet đó, ví dụ `snet-indiasouthcentral-1 - 172.16.0.0/24` | Không cần tạo thêm subnet cho một VM. |
+| **Virtual network** | Có thể để VNet mới Portal đề xuất, ví dụ `vnet-AZURE_REGION-1` | VNet phải cùng region với **VM**; region của Resource Group có thể khác. |
+| **Subnet** | Để subnet mới trong VNet đó, ví dụ `snet-AZURE_REGION-1 - 172.16.0.0/24` | Không cần tạo thêm subnet cho một VM. |
 | **Public IP** | Chọn IP mới; bấm **Create new** để kiểm tra **Standard / Static / IPv4** | Dùng IP này cho SSH và bản ghi DNS failover. Chỉ nhìn tên IP trong ô chọn chưa xác nhận được nó là Static. |
 | **NIC network security group** | **Basic** | Portal tạo NSG để quản lý các cổng vào VM. |
 | **Public inbound ports** | **Allow selected ports** | Mở danh sách cổng ở dòng tiếp theo. |
 | **Select inbound ports** | **SSH (22)** | Cổng 80 sẽ thêm sau khi tạo VM; không cần chọn Load balancing. |
 
-Người triển khai đã xác nhận **VM → Overview → Location: India South Central**. VM và VNet phải cùng region. Sau khi sửa `APP_REGION` trong Compose, API đã trả `region=indiasouthcentral`; xem bằng chứng ở mục 9. [Microsoft: VM và VNet cùng region](https://learn.microsoft.com/en-us/azure/virtual-network/network-overview).
+Sau khi tạo, kiểm tra **VM → Overview → Location** và đối chiếu với `AZURE_REGION`; VM và VNet phải cùng region. Ở mục 9, `/version` phải trả `region=AZURE_REGION`. [Microsoft: VM và VNet cùng region](https://learn.microsoft.com/en-us/azure/virtual-network/network-overview).
 
 ### 5.2. Sau khi bấm **Review + create**
 
@@ -136,15 +136,15 @@ cd /opt/dcs29
 sudo nano compose.yaml
 ```
 
-Dán nội dung này, **thay `OWNER` bằng tên tài khoản/tổ chức sở hữu image trên GHCR, viết chữ thường và không giữ nguyên chữ `OWNER`**. Ví dụ dùng `APP_REGION: indiasouthcentral` theo VM hiện tại; nếu tạo ở vùng khác thì đổi thành mã **Location thực của VM**. Trong `nano`: `Ctrl+O`, Enter, `Ctrl+X`.
+Dán nội dung này sau khi thay `GHCR_IMAGE`, `IMAGE_DIGEST` và `AZURE_REGION` bằng giá trị trong [bảng thông số](THONG_SO_TRIEN_KHAI.md). `APP_REGION` phải đúng mã **Location thực của VM**. Trong `nano`: `Ctrl+O`, Enter, `Ctrl+X`.
 
 ```yaml
 services:
   app:
-    image: ghcr.io/OWNER/multi-cloud-deployment-failover@sha256:e48779c88fd265bebcf7bdaabfef39bf47d8498eac49b03ab30e9e61a7d51fe5
+    image: GHCR_IMAGE@sha256:IMAGE_DIGEST
     environment:
       APP_ENV: azure-standby
-      APP_REGION: indiasouthcentral
+      APP_REGION: AZURE_REGION
     restart: unless-stopped
     expose:
       - "8080"
@@ -230,42 +230,24 @@ Invoke-RestMethod 'http://AZURE_PUBLIC_IP/api/devices'
 Test-NetConnection AZURE_PUBLIC_IP -Port 8080
 ```
 
-Mở `http://AZURE_PUBLIC_IP` để thấy dashboard. `/version` phải trả `environment=azure-standby`, `region=indiasouthcentral` theo Location VM hiện tại, cùng `version=sha-5b362a2321713ce8dfef45101bf37e834a21cc73` như AWS. `dataset_sha256` phải bắt đầu bằng `40242be543f3`; mốc AWS đã lưu chỉ có 12 ký tự đầu nên muốn chứng minh toàn bộ hash/dữ liệu giống nhau, bật AWS rồi gọi `/version` và `/api/devices` ở cả hai bên. Cổng 8080 phải không truy cập được từ Internet. GĐ4 dùng HTTP; HTTPS ở GĐ5.
+Mở `http://AZURE_PUBLIC_IP` để thấy dashboard. `/version` phải trả `environment=azure-standby`, `region=AZURE_REGION` theo Location VM, `commit_sha=COMMIT_SHA` đúng run GĐ2 và `dataset_sha256` đầy đủ giống AWS. Gọi `/version` và `/api/devices` ở cả hai VM trong cùng lượt. Cổng 8080 phải không truy cập được từ Internet. GĐ4 dùng HTTP; HTTPS ở GĐ5.
 
-### Kết quả đã kiểm tra ngày 24/09/2026
+### Tự nghiệm thu lần triển khai này
 
-[Ảnh dashboard Azure](../../images/azure-web-2026-09-24.png) hiển thị trang qua `http://172.198.68.77`, **Healthy**, `azure-standby`, `region=eastasia`, version `sha-5b362a2321713ce8dfef45101bf37e834a21cc73` và fingerprint rút gọn `40242be543f3`. Kiểm tra HTTP từ bên ngoài VM xác nhận:
+Từ laptop, gọi `/health/ready`, `/api/status`, `/api/devices`, `/version` qua `http://AZURE_PUBLIC_IP`; các endpoint phải trả HTTP 200 và dashboard phải mở được. `Test-NetConnection AZURE_PUBLIC_IP -Port 8080` phải thất bại từ Internet; đồng thời kiểm tra NSG không mở 8080.
 
-| Endpoint | Kết quả |
-|---|---|
-| `http://172.198.68.77/health/ready` | HTTP 200, `status=ready` |
-| `http://172.198.68.77/api/status` | HTTP 200, `status=healthy`, `environment=azure-standby` |
-| `http://172.198.68.77/api/devices` | HTTP 200 |
-| `http://172.198.68.77/version` | HTTP 200, commit `5b362a2321713ce8dfef45101bf37e834a21cc73`, `dataset_sha256=40242be543f3d25dc7d07a135ef1227c1006b3e60b0cb6e6610818ecd1fbbe9d` |
-| `http://172.198.68.77:8080/health/ready` | Kết nối hết thời gian chờ từ bên ngoài; phù hợp với cấu hình không mở cổng 8080, nhưng vẫn nên kiểm tra NSG trong Portal |
+Gọi `/version` của AWS và Azure trong cùng lượt. Hai bên phải có cùng `commit_sha` và **toàn bộ** `dataset_sha256`, còn Azure phải trả `environment=azure-standby` và `region=AZURE_REGION` đúng Location VM. Kiểm tra image đang chạy bằng `sudo docker compose ps` và `sudo docker image inspect GHCR_IMAGE@sha256:IMAGE_DIGEST` trên VM; không suy ra digest chỉ từ Compose YAML.
 
-Sau khi người triển khai sửa `APP_REGION`, kiểm tra lại từ bên ngoài VM lúc **14:49 UTC ngày 24/09/2026**: `/version` trả **HTTP 200**, `environment=azure-standby`, `region=indiasouthcentral`, commit `5b362a2321713ce8dfef45101bf37e834a21cc73` và `dataset_sha256=40242be543f3d25dc7d07a135ef1227c1006b3e60b0cb6e6610818ecd1fbbe9d`; `/api/status` trả **HTTP 200**, `status=healthy`, cùng region; `/health/ready` trả **HTTP 200**, `status=ready`. Ảnh trên ghi lại trạng thái **trước khi sửa**, nên vẫn hiển thị `eastasia`.
-
-Đã khớp **version** với mốc AWS ghi ở GĐ3 và fingerprint đầy đủ với dữ liệu mẫu GĐ1. AWS trước đó chỉ lưu **12 ký tự đầu** của fingerprint từ dashboard, nên chưa gọi hai `/version` cùng lúc để xác nhận toàn bộ hash trực tiếp giữa hai cloud. Cũng chưa có bằng chứng từ `sudo docker compose ps`/`docker image inspect` về digest đang chạy hoặc thử reboot Azure VM.
-
-Đây là cách sửa cho trường hợp VM ở India South Central nhưng app báo `eastasia`; khi cần thực hiện lại, SSH vào VM và chạy tại `/opt/dcs29`:
+Nếu `region` sai, sửa `APP_REGION` trong `/opt/dcs29/compose.yaml` thành mã Location VM rồi chạy:
 
 ```bash
 cd /opt/dcs29
-sudo nano compose.yaml
-```
-
-Đổi riêng dòng `APP_REGION: eastasia` thành `APP_REGION: indiasouthcentral`, lưu file (`Ctrl+O`, Enter, `Ctrl+X`), rồi chạy:
-
-```bash
 sudo docker compose config -q
 sudo docker compose up -d --no-deps --force-recreate --pull never app
 curl -fsS http://127.0.0.1/version
 ```
 
-Kết quả `/version` phải có `region=indiasouthcentral`; sau đó kiểm tra lại `http://172.198.68.77/version` từ máy cá nhân. Lệnh chỉ tạo lại container `app`, không xóa VM hay image đã pull.
-
-Thử reboot Azure VM trong Portal, đợi lên lại rồi chạy `sudo docker compose -f /opt/dcs29/compose.yaml ps` và gọi lại `/health/ready`, `/version` qua Public IP. Hai container phải tự chạy. Có thể thử `sudo docker compose up -d --no-deps --force-recreate --pull never app` tại `/opt/dcs29`, sau đó gọi lại health qua NGINX.
+Reboot Azure VM trong Portal; sau khi VM Running, kiểm tra `sudo docker compose -f /opt/dcs29/compose.yaml ps`, `/health/ready` và `/version` qua Public IP. Hai container phải tự chạy lại. Lưu output mới của lần triển khai này, không dùng ảnh hoặc kết quả của người khác.
 
 ## 10. Chuẩn bị buổi demo và chi phí
 
@@ -284,4 +266,4 @@ Lưu ảnh/cấu hình **không chứa private key, token, username cá nhân**:
 - [ ] Reboot VM xong ứng dụng tự chạy lại.
 - [ ] Trước thử failover, cả AWS và Azure đều đang chạy và healthy.
 
-Đã xác nhận Azure phục vụ qua Public IP, Location VM là India South Central và app báo đúng `indiasouthcentral`. Trước khi đánh dấu GĐ4 hoàn tất, kiểm tra cấu hình mạng/digest trên Portal và VM, rồi thử reboot. Sau đó làm [GĐ5 — domain/HTTPS](GIAI_DOAN_05_DOMAIN_VA_HTTPS.md) và [GĐ6 — Route 53 failover](GIAI_DOAN_06_ROUTE53_FAILOVER.md).
+Chỉ đánh dấu GĐ4 hoàn tất khi cấu hình mạng, digest đang chạy, endpoint và reboot đã được kiểm tra trên VM của bạn. Sau đó làm [GĐ5 — domain/HTTPS](GIAI_DOAN_05_DOMAIN_VA_HTTPS.md) và [GĐ6 — Route 53 failover](GIAI_DOAN_06_ROUTE53_FAILOVER.md).

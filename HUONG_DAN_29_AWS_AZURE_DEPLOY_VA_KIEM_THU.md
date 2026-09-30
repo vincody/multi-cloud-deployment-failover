@@ -2,7 +2,7 @@
 
 Ngày lập: 22/09/2026.
 
-> **Lưu ý cập nhật 24/09/2026:** Đây là bản kế hoạch ban đầu; các bước Azure Container Apps bên dưới **đã lỗi thời và không dùng để triển khai**. Nhóm đã chuyển Azure standby sang **Ubuntu VM + Docker Compose**. Azure VM đang phục vụ dashboard/API qua HTTP; bằng chứng và việc còn cần xác nhận nằm trong [GĐ4 Azure VM Portal](docs/giai-doan/GIAI_DOAN_04_AZURE_PORTAL.md). Dùng [GĐ5 domain/HTTPS](docs/giai-doan/GIAI_DOAN_05_DOMAIN_VA_HTTPS.md) và [GĐ6 Route 53 failover](docs/giai-doan/GIAI_DOAN_06_ROUTE53_FAILOVER.md) cho các bước tiếp theo. Khi thử failover tự động, Azure VM phải đang chạy và healthy; ngoài giờ demo có thể deallocate để giảm phí compute.
+> **Tài liệu lưu trữ, không dùng làm hướng dẫn triển khai.** Bản kế hoạch này còn các bước Azure Container Apps cũ và ghi nhận của một lần chạy trước. Để tự triển khai bằng tài khoản, domain và IP của bạn, bắt đầu ở [bảng thông số](docs/giai-doan/THONG_SO_TRIEN_KHAI.md), rồi làm theo [GĐ1–GĐ8](docs/giai-doan/README.md). Phương án hiện dùng AWS EC2 + Azure Ubuntu VM + Docker Compose.
 
 Sơ đồ mới dùng đúng Azure VM: [PNG](images/kien-truc-multi-cloud.png) · [SVG chỉnh sửa được](images/kien-truc-multi-cloud.svg) · [workflow và nguồn icon](images/ARCHITECTURE.md).
 

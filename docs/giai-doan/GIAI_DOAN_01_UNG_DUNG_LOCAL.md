@@ -38,7 +38,7 @@ Nếu dataset thiếu hoặc sai JSON, app fail-fast thay vì báo readiness gi�
 | Giá trị | Local | AWS dự kiến | Azure dự kiến |
 |---|---|---|---|
 | `APP_ENV` | `local` | `aws-primary` | `azure-standby` |
-| `APP_REGION` | `local-development` | `ap-southeast-1` | Azure region đã chọn |
+| `APP_REGION` | `local-development` | `AWS_REGION` | Azure region đã chọn |
 | `APP_VERSION` | mặc định `v0.1.0` | lấy từ image/CI | giống AWS |
 | `COMMIT_SHA` | tự đọc Git | CI truyền full SHA | cùng SHA AWS |
 | `dataset_sha256` | tính lúc startup | cùng fingerprint | cùng fingerprint |
@@ -61,7 +61,7 @@ API/health/version có `Cache-Control: no-store` để cache không che sự c�
 
 ## 6. UI đã làm
 
-**Cập nhật giao diện 28/09/2026:** Trang chính theo `DESIGN.md`, không có sidebar hay biểu đồ. Nội dung tập trung vào health, cloud đang phục vụ, region, uptime, độ trễ gọi `/api/status` từ trình duyệt và ba chỉ số workload trong 60 giây: số request `/api/devices`, tỷ lệ response lỗi (HTTP 4xx/5xx) và độ trễ server p95. Khi chưa có request workload, tỷ lệ lỗi và p95 hiển thị `—` thay vì số giả. Không hiển thị version/commit, bảng thiết bị lab hay CPU/RAM VM. UI tự kiểm tra mỗi 5 giây khi tab đang hiển thị; request `/api/status` không được tính vào workload. Khi API lỗi, nội dung chuyển sang trạng thái không khả dụng thay vì giữ thông tin cloud cũ. Backend `/version` và `/api/devices` vẫn được giữ cho xác minh deploy và đo tải GD8.
+**Giao diện hiện tại:** Trang chính theo `DESIGN.md`, không có sidebar hay biểu đồ. Nội dung tập trung vào health, cloud đang phục vụ, region, uptime, độ trễ gọi `/api/status` từ trình duyệt và ba chỉ số workload trong 60 giây: số request `/api/devices`, tỷ lệ response lỗi (HTTP 4xx/5xx) và độ trễ server p95. Khi chưa có request workload, tỷ lệ lỗi và p95 hiển thị `—` thay vì số giả. Không hiển thị version/commit, bảng thiết bị lab hay CPU/RAM VM. UI tự kiểm tra mỗi 5 giây khi tab đang hiển thị; request `/api/status` không được tính vào workload. Khi API lỗi, nội dung chuyển sang trạng thái không khả dụng thay vì giữ thông tin cloud cũ. Backend `/version` và `/api/devices` vẫn được giữ cho xác minh deploy và đo tải GD8.
 
 UI bám `DESIGN.md`: canvas near-black, surface charcoal, hairline border, lavender cho CTA/focus và màu semantic cho health. Grid responsive 3 → 2 → 1 cột; có focus-visible và reduced-motion.
 
@@ -83,21 +83,21 @@ Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8080/api/devices
 Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8080/metrics
 ```
 
-## 8. Kết quả thực tế
+## 8. Kết quả cần tự xác nhận
 
-- 3 automated tests pass.
+- Tất cả automated tests pass trên commit bạn sẽ build.
 - Readiness trả HTTP 200 và đúng dataset SHA.
 - Status trả `environment=local`, healthy, `Cache-Control=no-store`, `X-Served-By=local`.
 - Devices trả đủ 6 ID từ `LAB-001` đến `LAB-006`.
-- Browser xác nhận auto-refresh, Refresh, bảng dữ liệu và trạng thái health hoạt động.
-- Fingerprint dataset: `40242be543f3d25dc7d07a135ef1227c1006b3e60b0cb6e6610818ecd1fbbe9d`.
+- Browser xác nhận auto-refresh, nút Làm mới, cloud/health và bốn thẻ chỉ số hoạt động; không có bảng thiết bị trên UI.
+- Ghi fingerprint dataset từ `/version` thành `DATASET_SHA256` trong [bảng thông số](THONG_SO_TRIEN_KHAI.md).
 - Warning deprecation từ test client không làm test thất bại.
 
-## 9. Vấn đề đã gặp
+## 9. Nếu gặp lỗi
 
-Lần Docker build đầu không resolve được Docker Hub. Đây là lỗi mạng Docker Desktop, không phải FastAPI. Khi Docker có mạng, base image và application image đã build thành công ở GĐ2. Vì vậy source/test được nghiệm thu tại GĐ1; container/registry được nghiệm thu tại GĐ2.
+Nếu Docker build không resolve được Docker Hub, kiểm tra mạng và Docker Desktop ở GĐ2; lỗi đó không chứng minh FastAPI sai. GĐ1 nghiệm thu source/test local, GĐ2 nghiệm thu container/registry.
 
-Trạng thái version ban đầu là `dev / commit unknown`. Đã sửa thành version `v0.1.0`, Git SHA tự phát hiện local và build args trong CI.
+Nếu `/version` local chưa có Git SHA, kiểm tra đang chạy trong Git checkout và so với commit mà CI sẽ build. Image CI đặt version/SHA bằng build args.
 
 ## 10. Bằng chứng cần lưu
 
@@ -105,19 +105,19 @@ Trạng thái version ban đầu là `dev / commit unknown`. Đã sửa thành v
 - Output `pytest`.
 - Response `/version`, `/health/ready` và mẫu `/metrics`.
 - Dataset fingerprint.
-- Commit hoàn thiện UI GĐ1: `e23bf00`.
+- Commit source bạn dùng để build GĐ2.
 - Không lưu `.venv`, cache, `.env` thật hay token.
 
 ## 11. Checklist nghiệm thu
 
-- [x] UI/API chạy local.
-- [x] Health, readiness, status, version và metrics có contract rõ.
-- [x] Runtime identity phân biệt được origin.
-- [x] Dataset ổn định và có fingerprint.
-- [x] Endpoint đo đạc không bị cache.
-- [x] Tests pass.
-- [x] UI có trạng thái lỗi và responsive.
-- [x] Source sẵn sàng đóng gói.
+- [ ] UI/API chạy local.
+- [ ] Health, readiness, status, version và metrics có contract rõ.
+- [ ] Runtime identity phân biệt được origin.
+- [ ] Dataset ổn định và có fingerprint.
+- [ ] Endpoint đo đạc không bị cache.
+- [ ] Tests pass.
+- [ ] UI có trạng thái lỗi và responsive.
+- [ ] Source sẵn sàng đóng gói.
 
 ## 12. Kết luận và hướng tiếp theo
 

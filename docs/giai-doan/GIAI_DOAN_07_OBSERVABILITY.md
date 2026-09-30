@@ -1,14 +1,14 @@
 # Giai đoạn 7 — Monitoring và observability độc lập
 
-**Trạng thái:** Chưa thực hiện. Hướng dẫn và cấu hình đã chuẩn bị; EC2/Azure hiện đang tắt.
-**Mục tiêu:** thu bằng chứng availability/latency từ bên ngoài AWS để monitoring vẫn sống khi EC2 bị dừng.
+**Đầu vào:** GĐ5/GĐ6 đã pass với domain của bạn. Trước khi bật stack, thay **ba target URL trong `observability/prometheus.yml`** bằng hostname của bạn theo [bảng thông số](THONG_SO_TRIEN_KHAI.md); file trong repo chỉ là cấu hình của một lượt lab, không phải giá trị mặc định để dùng nguyên.
+**Mục tiêu:** thu bằng chứng availability/latency từ laptop bên ngoài AWS để monitoring vẫn sống khi EC2 bị dừng.
 
 > **Ghi chú ngay lúc này:** Bạn có thể để **cả EC2 và Azure VM tắt** trong lúc nghỉ. Bộ monitoring ở GD7 chạy trên **laptop Windows**, độc lập với hai VM. Khi hai VM tắt, cả ba probe sẽ báo lỗi; đó là kết quả đúng, không phải cấu hình hỏng. Chỉ bật hai VM ở bước 7.6 trước khi xác nhận hệ thống healthy và thử failover. Route 53 health checks/hosted zone vẫn tồn tại và có thể tiếp tục phát sinh phí dù máy đã tắt. Docker Desktop/Prometheus/Grafana trên laptop chỉ ghi số liệu khi laptop và Docker đang chạy.
 
 > **Khi không cần monitoring:** Trên **PowerShell laptop** (không SSH vào EC2/Azure), đứng tại thư mục repo rồi dừng cả Prometheus, Grafana và Blackbox Exporter bằng các lệnh sau. Chỉ cần làm nếu bạn đã chạy GD7 và tạo `observability/.env`; nếu chưa khởi chạy ba container thì không có gì cần dừng.
 
 ```powershell
-Set-Location C:\UIT\HeTinhToanPhanBo
+Set-Location 'PATH_TO_REPO'
 docker compose --env-file observability/.env -f observability/compose.yaml stop
 docker compose --env-file observability/.env -f observability/compose.yaml ps --all
 ```
@@ -19,7 +19,7 @@ docker compose --env-file observability/.env -f observability/compose.yaml ps --
 
 | Nhãn trong hướng dẫn | Thực hiện ở đâu |
 |---|---|
-| **LAPTOP / POWERSHELL** | Terminal PowerShell Windows mở tại thư mục repo `C:\UIT\HeTinhToanPhanBo`, **không SSH** |
+| **LAPTOP / POWERSHELL** | Terminal PowerShell Windows mở tại thư mục repo của bạn, **không SSH** |
 | **LAPTOP / TRÌNH DUYỆT** | Docker Desktop, Prometheus `http://localhost:9090`, Grafana `http://localhost:3000` |
 | **AWS CONSOLE** | EC2 → Instances → Start/kiểm tra EC2 primary |
 | **AZURE PORTAL** | Virtual machines → Start/kiểm tra Azure standby |
@@ -28,13 +28,13 @@ docker compose --env-file observability/.env -f observability/compose.yaml ps --
 
 Không cài Prometheus/Grafana lên EC2 hoặc Azure VM. Laptop là điểm quan sát thứ ba: EC2 lỗi thì số liệu vẫn ghi nếu laptop còn hoạt động. Khi laptop tắt/sleep hoặc Internet laptop mất, xuất hiện khoảng trống dữ liệu; **không diễn giải khoảng trống đó thành downtime ứng dụng**.
 
-Ba URL được giám sát cố định:
+Ba URL cần cấu hình cho lần chạy mới:
 
 | Nhãn | URL probe | IP origin đã dùng ở GD5/GD6 |
 |---|---|---|
-| `aws-origin` | `https://aws-origin.cloudfailover.id.vn/health/ready` | `18.143.30.46` |
-| `azure-origin` | `https://azure-origin.cloudfailover.id.vn/health/ready` | `172.198.68.77` |
-| `shared-domain` | `https://app.cloudfailover.id.vn/health/ready` | Route 53 chọn AWS hoặc Azure |
+| `aws-origin` | `https://aws-origin.YOUR_DOMAIN/health/ready` | `AWS_PUBLIC_IP` |
+| `azure-origin` | `https://azure-origin.YOUR_DOMAIN/health/ready` | `AZURE_PUBLIC_IP` |
+| `shared-domain` | `https://app.YOUR_DOMAIN/health/ready` | Route 53 chọn AWS hoặc Azure |
 
 **Quan trọng:** `aws-origin` và `azure-origin` là hostname riêng, không đi qua record failover `app`. Target `shared-domain` chỉ cho biết URL người dùng đang hoạt động; nó **không cho biết cloud nào đã trả lời**. Để xác định cloud, gọi `/version` và đọc `environment` như GD6/GD8.
 
@@ -46,7 +46,7 @@ Ba URL được giám sát cố định:
 2. Mở **PowerShell mới** trên laptop; chạy từng lệnh:
 
    ```powershell
-   Set-Location C:\UIT\HeTinhToanPhanBo
+   Set-Location 'PATH_TO_REPO'
    docker --version
    docker compose version
    docker info --format '{{.ServerVersion}}'
@@ -56,14 +56,17 @@ Ba URL được giám sát cố định:
 
 ### 7.2. LAPTOP — tạo mật khẩu Grafana local
 
-Repo có sẵn `observability/compose.yaml`, `prometheus.yml`, `blackbox.yml` và Grafana datasource. **Không cần tự tạo lại YAML**. Trên PowerShell laptop:
+Repo có sẵn `observability/compose.yaml`, `prometheus.yml`, `blackbox.yml` và Grafana datasource. **Không cần tạo lại YAML**, nhưng **phải sửa URL probe** vì file mẫu còn hostname của lượt triển khai trước. Trên PowerShell laptop:
 
 ```powershell
 Copy-Item observability/.env.example observability/.env
 notepad observability/.env
+notepad observability/prometheus.yml
 ```
 
-Trong Notepad thay giá trị sau dấu `=` bằng mật khẩu riêng của bạn, lưu và đóng. Không thêm dấu nháy hoặc khoảng trắng ở hai đầu. File `.env` đã được `.gitignore`, không commit hoặc gửi lên chat. Ví dụ trong `.env.example` chỉ là placeholder, **không dùng nguyên mẫu**. Nếu đã có `.env` từ lần trước, bỏ qua `Copy-Item` và chỉ mở kiểm tra; tránh ghi đè mật khẩu.
+Trong `.env`, thay giá trị sau dấu `=` bằng mật khẩu riêng, lưu và đóng. Không thêm dấu nháy hoặc khoảng trắng ở hai đầu. File `.env` đã được `.gitignore`; không commit hoặc gửi lên chat. Nếu đã có `.env`, bỏ qua `Copy-Item` để tránh ghi đè mật khẩu.
+
+Trong `prometheus.yml`, tìm **ba dòng `targets` dưới job `blackbox_https`** và thay URL thành `https://aws-origin.YOUR_DOMAIN/health/ready`, `https://azure-origin.YOUR_DOMAIN/health/ready`, `https://app.YOUR_DOMAIN/health/ready` sau khi thay `YOUR_DOMAIN` bằng domain thật. Giữ nguyên label `target_name` tương ứng. Lưu file, đọc lại ba URL để chắc chắn không còn hostname/IP của người triển khai khác. Chỉ sau bước này mới chạy `docker compose ... up -d` ở 7.3.
 
 ### 7.3. LAPTOP — bật stack monitoring
 
@@ -111,17 +114,17 @@ docker compose --env-file observability/.env -f observability/compose.yaml logs 
 
 Đến bước này mới cần bật cloud:
 
-1. **AWS CONSOLE:** EC2 → Instances → chọn EC2 GD3 → **Start instance**. Đợi trạng thái `Running` và status checks pass. Elastic IP dự kiến vẫn là `18.143.30.46`.
-2. **AZURE PORTAL:** Virtual machines → chọn VM GD4 → **Start**. Đợi `Running`. Static Public IP dự kiến vẫn là `172.198.68.77`.
+1. **AWS CONSOLE:** EC2 → Instances → chọn EC2 GD3 → **Start instance**. Đợi trạng thái `Running` và status checks pass. Elastic IP dự kiến vẫn là `AWS_PUBLIC_IP`.
+2. **AZURE PORTAL:** Virtual machines → chọn VM GD4 → **Start**. Đợi `Running`. Static Public IP dự kiến vẫn là `AZURE_PUBLIC_IP`.
 3. **LAPTOP / POWERSHELL:** chạy **từng lệnh**:
 
    ```powershell
-   Resolve-DnsName aws-origin.cloudfailover.id.vn -Type A -Server 1.1.1.1
-   Resolve-DnsName azure-origin.cloudfailover.id.vn -Type A -Server 1.1.1.1
-   curl.exe --fail-with-body https://aws-origin.cloudfailover.id.vn/health/ready
-   curl.exe --fail-with-body https://azure-origin.cloudfailover.id.vn/health/ready
-   curl.exe --fail-with-body https://app.cloudfailover.id.vn/health/ready
-   curl.exe --fail-with-body https://app.cloudfailover.id.vn/version
+   Resolve-DnsName aws-origin.YOUR_DOMAIN -Type A -Server 1.1.1.1
+   Resolve-DnsName azure-origin.YOUR_DOMAIN -Type A -Server 1.1.1.1
+   curl.exe --fail-with-body https://aws-origin.YOUR_DOMAIN/health/ready
+   curl.exe --fail-with-body https://azure-origin.YOUR_DOMAIN/health/ready
+   curl.exe --fail-with-body https://app.YOUR_DOMAIN/health/ready
+   curl.exe --fail-with-body https://app.YOUR_DOMAIN/version
    ```
 
 Hai DNS origin phải trả đúng IP trên; ba lệnh readiness phải thành công. `/version` ở trạng thái bình thường dự kiến `environment=aws-primary`. Nếu sau Start VM mà `curl` chưa kết nối, đợi vài phút cho Docker/NGINX/app trên VM khởi động; kiểm tra bước khởi động trong GD5/GD6 trước khi sửa monitoring. Nếu IP đã thay đổi thì sửa bản ghi A origin và cập nhật tài liệu, không cố dùng IP cũ.
@@ -164,7 +167,7 @@ Mục này kiểm tra monitoring ghi lại biến cố. **Không chạy nếu Az
    ```
 
    Nếu service trong Compose của bạn không tên `app`, xem `sudo docker compose config --services` rồi dùng đúng tên service app; không stop NGINX/Certbot/Azure. Ghi thời gian UTC `t_action` từ PowerShell laptop: `(Get-Date).ToUniversalTime().ToString('o')`.
-2. **LAPTOP:** quan sát Prometheus/Grafana. AWS `probe_success` phải xuống `0`; Azure vẫn `1`. Shared có thể xuống `0` trong thời gian Route 53 phát hiện lỗi/cache DNS, rồi trở lại `1`. Đây là probe độc lập, **không đồng nghĩa browser cũ sẽ tự đổi kết nối**. Dùng `curl.exe --fail-with-body https://app.cloudfailover.id.vn/version` hoặc browser mới để xác nhận `azure-standby` khi DNS đã failover. Nhớ Route 53 health check của GD6 chạy khoảng 30 giây và cần nhiều kết quả liên tiếp; đừng kết luận sau một probe 10 giây.
+2. **LAPTOP:** quan sát Prometheus/Grafana. AWS `probe_success` phải xuống `0`; Azure vẫn `1`. Shared có thể xuống `0` trong thời gian Route 53 phát hiện lỗi/cache DNS, rồi trở lại `1`. Đây là probe độc lập, **không đồng nghĩa browser cũ sẽ tự đổi kết nối**. Dùng `curl.exe --fail-with-body https://app.YOUR_DOMAIN/version` hoặc browser mới để xác nhận `azure-standby` khi DNS đã failover. Nhớ Route 53 health check của GD6 chạy khoảng 30 giây và cần nhiều kết quả liên tiếp; đừng kết luận sau một probe 10 giây.
 3. **CHỈ EC2:** khôi phục ngay sau khi đã quan sát:
 
    ```bash

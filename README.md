@@ -4,7 +4,7 @@ Project #29 runs one application on AWS EC2 (primary) and an Azure Ubuntu VM (st
 
 ## Current state
 
-The application, AWS and Azure origins, HTTPS, Route 53 failover, and laptop-based Prometheus/Grafana/Blackbox monitoring have been set up. The operator has confirmed stage 7 is complete; stage 8 failover measurements and the final report remain. The dashboard now shows the serving cloud, region, uptime, and `/api/devices` workload metrics from the last 60 seconds. See [stage status and remaining checks](docs/giai-doan/README.md).
+This repository contains the app, CI image workflow, and step-by-step guides for AWS EC2 primary, Azure VM standby, HTTPS, Route 53 failover, and laptop-based monitoring. The dashboard shows the serving cloud, region, uptime, and `/api/devices` workload metrics from the last 60 seconds. Every deployment must create its **own** cloud resources and use its **own** domain, IPs, and image digest. Start with the [deployment worksheet](docs/giai-doan/THONG_SO_TRIEN_KHAI.md), then follow the [stages](docs/giai-doan/README.md).
 
 ## Project layout and planned artifacts
 
@@ -65,6 +65,6 @@ Invoke-WebRequest -UseBasicParsing http://127.0.0.1:18080/version
 docker stop dcs29-check
 ```
 
-Pushing a commit to `main` runs [the container workflow](.github/workflows/container.yml): API tests, a Linux AMD64 build, publication to `ghcr.io/vincody/multi-cloud-deployment-failover`, and a clean-pull runtime check. The workflow publishes `main` and `sha-<commit>` tags and records the immutable image digest as a run artifact. Deploy the **same digest** to AWS and Azure; do not use a mutable tag as evidence that both origins run identical code.
+Pushing a commit to `main` runs [the container workflow](.github/workflows/container.yml): API tests, a Linux AMD64 build, publication to `ghcr.io/<your-owner>/<your-repo>`, and a clean-pull runtime check. The workflow publishes `main` and `sha-<commit>` tags and records the immutable image digest as a run artifact. Fill `GHCR_IMAGE` and `IMAGE_DIGEST` in the deployment worksheet from **your run**, then deploy the **same digest** to AWS and Azure; do not use a mutable tag as evidence that both origins run identical code.
 
 Do not commit `.env` files, cloud credentials, private keys, certificates, or Terraform state. The repository ignores common secret and local-state paths, but review staged files before every push.

@@ -1,21 +1,20 @@
 # Giai đoạn 2 — Container image dùng chung và CI
 
-**Trạng thái:** Hoàn thành ngày 22/09/2026.
-**Phạm vi:** Docker image, metadata, GitHub Actions, GHCR và clean-runner verification; chưa deploy cloud.
+**Phạm vi:** Docker image, metadata, GitHub Actions, GHCR và clean-runner verification; chưa deploy cloud. Trước khi làm, đọc [bảng thông số](THONG_SO_TRIEN_KHAI.md).
 
 ## 1. Mục tiêu và artifact cuối
 
 GĐ2 tạo đúng một artifact từ source GĐ1 để AWS và Azure không tự build hai bản khác nhau. Deployment phải tham chiếu digest bất biến, không dùng riêng tag `latest`.
 
-| Thuộc tính | Giá trị đã nghiệm thu |
+| Thuộc tính | Giá trị cần ghi từ run của bạn |
 |---|---|
-| Image | `ghcr.io/vincody/multi-cloud-deployment-failover` |
-| Commit | `5b362a2321713ce8dfef45101bf37e834a21cc73` |
-| GHCR digest | `sha256:e48779c88fd265bebcf7bdaabfef39bf47d8498eac49b03ab30e9e61a7d51fe5` |
+| Image | `GHCR_IMAGE` — lấy từ `image=` trong artifact `image-identity-*` |
+| Commit | `COMMIT_SHA` — lấy từ `commit=` của cùng artifact |
+| GHCR digest | `sha256:IMAGE_DIGEST` — lấy từ `digest=` của cùng artifact |
 | Platform | `linux/amd64` |
-| Actions run | [35684300924](https://github.com/vincody/multi-cloud-deployment-failover/actions/runs/35684300924) |
+| Actions run | URL run mới của repo bạn, cả ba job phải success |
 
-AWS/Azure phải dùng `image@sha256:e487...` để chứng minh cùng artifact.
+AWS/Azure phải dùng **cùng** `GHCR_IMAGE@sha256:IMAGE_DIGEST` của run đã pass để chứng minh cùng artifact.
 
 ## 2. File đã thay đổi và lý do
 
@@ -44,19 +43,19 @@ Chúng trở thành ENV và OCI labels `source`, `version`, `revision`. Cloud ch
 
 Docker HEALTHCHECK gọi `/health/ready` mỗi 30 giây, timeout 3 giây, start period 5 giây, 3 lần lỗi mới unhealthy. Nó kiểm tra bên trong container; Route 53 ở GĐ6 kiểm tra từ bên ngoài.
 
-## 4. Build local đã thực hiện
+## 4. Build và kiểm tra local
 
 ```powershell
 docker build --platform linux/amd64 --build-arg APP_VERSION=v0.1.0 --build-arg COMMIT_SHA=local-phase2 -t dcs29-app:phase2 .
 ```
 
-Kết quả:
+Kết quả cần tự ghi:
 
 | Thuộc tính | Giá trị |
 |---|---|
-| Local image ID | `sha256:c0eb89450704e255300db4265e418f0bda77488e02582a7a6be26064c5b3d57f` |
+| Local image ID | Lấy từ `docker image inspect dcs29-app:phase2` |
 | OS/arch | `linux/amd64` |
-| Size | khoảng 233 MB |
+| Size | Đọc từ image vừa build; có thể khác theo thời điểm |
 | OCI version | `v0.1.0` |
 | OCI revision | `local-phase2` |
 
@@ -103,21 +102,13 @@ Job chạy trên runner Ubuntu sạch:
 
 Nhờ job này, cache/image local không thể làm bài kiểm tra pass giả.
 
-## 6. Kết quả CI thật
+## 6. Lấy kết quả CI của lần build mới
 
-Run `35684300924` hoàn thành `success`:
-
-| Job | Kết quả | Bằng chứng |
-|---|---|---|
-| `test` | success | 3 API tests pass |
-| `container` | success | Image được push, digest được xuất |
-| `verify-published-image` | success | Runner sạch pull digest và gọi runtime thành công |
-
-Artifact `image-identity-<commit>` chứa `manifest.txt`. Digest lưu trong artifact/summary thay vì commit vào source, tránh vòng lặp “commit digest tạo ra digest mới”.
+Push source lên nhánh `main` trong repo của bạn, mở **Actions → Test and publish container** của commit vừa push. Chỉ tiếp tục khi `test`, `container` và `verify-published-image` đều báo **success**. Tải artifact `image-identity-<commit>` và ghi chính xác `image`, `commit`, `digest`, `platform` vào [bảng thông số](THONG_SO_TRIEN_KHAI.md). Nếu một job fail, sửa lỗi rồi push commit mới; không dùng digest từ run cũ. Digest nằm trong artifact/summary thay vì commit vào source để tránh vòng lặp “commit digest tạo ra digest mới”.
 
 ## 7. GHCR authentication
 
-Credential Git trên máy push source được nhưng thiếu `read:packages`; pull private package local trả `permission_denied`. Đây không phải lỗi image. CI clean runner đã pull thành công bằng quyền đúng.
+Kiểm tra package mới trong GitHub **Packages**. Nếu package public, `docker pull GHCR_IMAGE@sha256:IMAGE_DIGEST` không cần login. Nếu private, dùng tài khoản có quyền đọc package và credential chỉ có `read:packages`.
 
 Cho GĐ3/GĐ4, chọn một phương án:
 
@@ -128,18 +119,18 @@ Cho GĐ3/GĐ4, chọn một phương án:
 Không commit token vào Compose, YAML, screenshot hoặc history. Nếu dùng token local:
 
 ```powershell
-$env:GHCR_TOKEN | docker login ghcr.io --username vincody --password-stdin
-docker pull ghcr.io/vincody/multi-cloud-deployment-failover@sha256:e48779c88fd265bebcf7bdaabfef39bf47d8498eac49b03ab30e9e61a7d51fe5
+$env:GHCR_TOKEN | docker login ghcr.io --username GHCR_OWNER --password-stdin
+docker pull GHCR_IMAGE@sha256:IMAGE_DIGEST
 ```
 
-## 8. Vấn đề đã gặp và xử lý
+## 8. Lỗi thường gặp
 
 | Vấn đề | Nguyên nhân | Xử lý/kết luận |
 |---|---|---|
-| Docker Hub DNS lỗi ban đầu | Docker Desktop chưa resolve registry | Chạy lại khi engine có mạng |
+| Docker Hub DNS lỗi | Docker Desktop chưa resolve registry | Kiểm tra mạng/engine rồi chạy lại |
 | Build vượt thời gian phiên lệnh | pip download lâu | Chạy build nền, đọc log/exit thật |
-| Local GHCR pull bị từ chối | Git token thiếu `read:packages` | Dùng clean CI job permission tối thiểu |
-| UI hiện `dev/unknown` | Default runtime tĩnh | Local Git detection + CI build args |
+| GHCR pull bị từ chối | Package private hoặc credential thiếu `read:packages` | Kiểm tra visibility/quyền, không thêm token vào Compose |
+| `/version` không khớp commit | Dùng image/tag của run khác | Pull lại đúng digest trong artifact của commit cần deploy |
 
 ## 9. Cách kiểm tra lại
 
@@ -162,14 +153,14 @@ Trên GitHub, mở run, kiểm tra cả ba job xanh, Job Summary có digest và 
 
 ## 11. Checklist nghiệm thu
 
-- [x] Base image và dependency trực tiếp được pin.
-- [x] Build Linux AMD64 thành công.
-- [x] Local container ready và Docker health healthy.
-- [x] Test chạy trước build.
-- [x] PR không push; main/tag push image.
-- [x] Digest được lưu trong summary/artifact.
-- [x] Runner sạch pull digest và kiểm tra runtime.
-- [x] Không có cloud secret trong workflow.
+- [ ] Base image và dependency trực tiếp được pin.
+- [ ] Build Linux AMD64 thành công.
+- [ ] Local container ready và Docker health healthy.
+- [ ] Test chạy trước build.
+- [ ] PR không push; main/tag push image.
+- [ ] Digest được lưu trong summary/artifact.
+- [ ] Runner sạch pull digest và kiểm tra runtime.
+- [ ] Không có cloud secret trong workflow.
 
 ## 12. Kết luận và hướng tiếp theo
 
