@@ -47,14 +47,17 @@ sudo docker compose version
 
 Thêm user vào nhóm docker là tùy chọn; logout/login lại mới có hiệu lực. Với máy lab, có thể dùng `sudo docker` để tránh thay đổi quyền không cần thiết.
 
-## 5. Pull private GHCR an toàn
+## 5. Pull image GHCR
+
+Nếu package đã chọn ở GĐ2 là **Public**, pull trực tiếp, không cần GitHub account hoặc token. Nếu package **Private**, login bằng credential chỉ có `read:packages` trước khi pull:
 
 ```bash
+# Chỉ chạy dòng này khi package private và GHCR_TOKEN đã được nhập an toàn:
 printf '%s' "$GHCR_TOKEN" | sudo docker login ghcr.io -u GHCR_OWNER --password-stdin
 sudo docker pull GHCR_IMAGE@sha256:IMAGE_DIGEST
 ```
 
-Nhập token qua session/secret manager, không ghi token vào Compose. Sau pull có thể logout registry nếu không cần auto-pull. Ghi lại digest từ `docker image inspect`.
+Với package public, **bỏ dòng `docker login`**, chỉ chạy `sudo docker pull GHCR_IMAGE@sha256:IMAGE_DIGEST`. Với package private, nhập token qua session/secret manager, không ghi token vào Compose. Sau pull có thể logout registry nếu không cần auto-pull. Ghi lại digest từ `docker image inspect`.
 
 ## 6. Cấu hình Compose
 

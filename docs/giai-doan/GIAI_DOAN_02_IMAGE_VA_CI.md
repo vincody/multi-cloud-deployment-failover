@@ -4,17 +4,17 @@
 
 ## 1. Mục tiêu và artifact cuối
 
-GĐ2 tạo đúng một artifact từ source GĐ1 để AWS và Azure không tự build hai bản khác nhau. Deployment phải tham chiếu digest bất biến, không dùng riêng tag `latest`.
+GĐ2 chốt đúng một artifact để AWS và Azure không tự build hai bản khác nhau. Có thể **dùng package GHCR đã phát hành của repo nguồn** hoặc tự build/push từ repo của nhóm. Deployment phải tham chiếu digest bất biến, không dùng riêng tag `main`/`latest`. Repo GitHub public và GHCR package public là hai thiết lập cần kiểm tra riêng.
 
-| Thuộc tính | Giá trị cần ghi từ run của bạn |
+| Thuộc tính | Giá trị cần ghi từ package version đã chọn |
 |---|---|
-| Image | `GHCR_IMAGE` — lấy từ `image=` trong artifact `image-identity-*` |
-| Commit | `COMMIT_SHA` — lấy từ `commit=` của cùng artifact |
-| GHCR digest | `sha256:IMAGE_DIGEST` — lấy từ `digest=` của cùng artifact |
+| Image | `GHCR_IMAGE` — lấy ở **Packages → Container** của repo nguồn hoặc `image=` trong artifact `image-identity-*` |
+| Commit | `COMMIT_SHA` — commit của run tạo package version đã chọn |
+| GHCR digest | `sha256:IMAGE_DIGEST` — lấy ở package version hoặc `digest=` của cùng run |
 | Platform | `linux/amd64` |
-| Actions run | URL run mới của repo bạn, cả ba job phải success |
+| Actions run | URL run đã tạo package version bạn dùng; nếu tự build, cả ba job phải success |
 
-AWS/Azure phải dùng **cùng** `GHCR_IMAGE@sha256:IMAGE_DIGEST` của run đã pass để chứng minh cùng artifact.
+AWS/Azure phải dùng **cùng** `GHCR_IMAGE@sha256:IMAGE_DIGEST` để chứng minh cùng artifact.
 
 ## 2. File đã thay đổi và lý do
 
@@ -102,19 +102,23 @@ Job chạy trên runner Ubuntu sạch:
 
 Nhờ job này, cache/image local không thể làm bài kiểm tra pass giả.
 
-## 6. Lấy kết quả CI của lần build mới
+## 6. Chọn package đã phát hành hoặc tự build
 
-Push source lên nhánh `main` trong repo của bạn, mở **Actions → Test and publish container** của commit vừa push. Chỉ tiếp tục khi `test`, `container` và `verify-published-image` đều báo **success**. Tải artifact `image-identity-<commit>` và ghi chính xác `image`, `commit`, `digest`, `platform` vào [bảng thông số](THONG_SO_TRIEN_KHAI.md). Nếu một job fail, sửa lỗi rồi push commit mới; không dùng digest từ run cũ. Digest nằm trong artifact/summary thay vì commit vào source để tránh vòng lặp “commit digest tạo ra digest mới”.
+**Dùng package có sẵn:** với chính repo này, đường dẫn package là `ghcr.io/vincody/multi-cloud-deployment-failover` (đây là đường dẫn image công khai, không phải domain/IP triển khai). Mở repo nguồn trên GitHub → **Packages** → container package → chọn version bạn muốn triển khai. Ghi đường dẫn đó vào `GHCR_IMAGE`, **digest `sha256:...` của version đã chọn** và commit/run đã tạo version vào [bảng thông số](THONG_SO_TRIEN_KHAI.md). Không chép một digest cố định từ tài liệu vì mỗi lần publish sẽ tạo version mới. Kiểm tra package hiển thị **Public**, rồi thử trên máy không login GHCR:
+
+```powershell
+docker pull GHCR_IMAGE@sha256:IMAGE_DIGEST
+```
+
+Nếu pull thành công, GĐ3/GĐ4 dùng cùng tham chiếu này trong Compose và **bỏ qua toàn bộ bước `docker login`**. Nếu `denied`, kiểm tra visibility của **package** và digest; repo source public không đủ để suy ra package public. Khi dùng package có sẵn, `/version` sẽ chứa commit của repo nguồn đã build image, không phải commit của bản clone trên máy bạn.
+
+**Tự build để có bằng chứng CI của nhóm:** push source lên nhánh `main` trong repo của bạn, mở **Actions → Test and publish container** của commit vừa push. Chỉ tiếp tục khi `test`, `container` và `verify-published-image` đều báo **success**. Tải artifact `image-identity-<commit>` và ghi chính xác `image`, `commit`, `digest`, `platform` của cùng run. Nếu một job fail, sửa lỗi rồi push commit mới. Digest nằm trong artifact/summary thay vì commit vào source để tránh vòng lặp “commit digest tạo ra digest mới”.
 
 ## 7. GHCR authentication
 
-Kiểm tra package mới trong GitHub **Packages**. Nếu package public, `docker pull GHCR_IMAGE@sha256:IMAGE_DIGEST` không cần login. Nếu private, dùng tài khoản có quyền đọc package và credential chỉ có `read:packages`.
+Kiểm tra visibility của **package** trong GitHub **Packages**. GHCR container package public cho phép pull không cần login; nếu private, dùng tài khoản có quyền đọc package và credential chỉ có `read:packages`.
 
-Cho GĐ3/GĐ4, chọn một phương án:
-
-1. Giữ private: tạo deployment credential chỉ có `read:packages`.
-2. Dùng secret/platform identity thích hợp.
-3. Chuyển package public nếu nhóm chấp nhận.
+Cho GĐ3/GĐ4, package **Public** chỉ cần đường dẫn image và digest. Nếu package **Private**, tạo deployment credential chỉ có `read:packages` hoặc dùng secret/platform identity phù hợp; nhóm có quyền quản trị package cũng có thể đổi visibility sang Public.
 
 Không commit token vào Compose, YAML, screenshot hoặc history. Nếu dùng token local:
 
@@ -134,33 +138,32 @@ docker pull GHCR_IMAGE@sha256:IMAGE_DIGEST
 
 ## 9. Cách kiểm tra lại
 
+Nếu tự build local, chạy:
+
 ```powershell
 .\.venv\Scripts\python -m pytest -q
 docker image inspect dcs29-app:phase2
 ```
 
-Trên GitHub, mở run, kiểm tra cả ba job xanh, Job Summary có digest và tải artifact manifest.
+Nếu dùng package có sẵn, kiểm tra version **Public** và pull bằng digest khi chưa login. Trên GitHub, mở run đã tạo version đó để đối chiếu commit/digest; nếu tự build, kiểm tra cả ba job xanh, Job Summary có digest và tải artifact manifest.
 
 ## 10. Bằng chứng cần lưu
 
 - Dockerfile, .dockerignore, pinned requirements.
 - Workflow source.
-- URL Actions run.
-- Artifact manifest và GHCR digest.
-- Output local health/version/image inspect.
+- URL Actions run đã tạo package version được chọn.
+- GHCR digest và artifact manifest nếu có.
+- Output pull/health/version/image inspect của version được chọn; thêm output build local nếu tự build.
 - Package visibility và chiến lược credential.
 - Không lưu token.
 
 ## 11. Checklist nghiệm thu
 
-- [ ] Base image và dependency trực tiếp được pin.
-- [ ] Build Linux AMD64 thành công.
-- [ ] Local container ready và Docker health healthy.
-- [ ] Test chạy trước build.
-- [ ] PR không push; main/tag push image.
-- [ ] Digest được lưu trong summary/artifact.
-- [ ] Runner sạch pull digest và kiểm tra runtime.
-- [ ] Không có cloud secret trong workflow.
+- [ ] Package version đã chọn là `linux/amd64`, ghi đúng image, digest và commit tương ứng.
+- [ ] Pull thành công đúng `GHCR_IMAGE@sha256:IMAGE_DIGEST`; public package pull không cần login.
+- [ ] Container từ digest đó ready/healthy và `/version` trả commit mong đợi.
+- [ ] Nếu tự build: test, build và clean-pull CI pass; lưu artifact của run đó.
+- [ ] Không có cloud secret trong workflow hoặc tài liệu.
 
 ## 12. Kết luận và hướng tiếp theo
 

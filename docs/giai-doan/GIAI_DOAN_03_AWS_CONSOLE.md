@@ -19,7 +19,7 @@ Internet → Elastic IP → Security Group (80) → EC2 Ubuntu
 | Key pair                      |           1 | RSA`.pem` để SSH; giữ ngoài repository                         |
 | AWS Budget                    |           1 | Cảnh báo chi phí theo hạn mức nhóm chọn                       |
 
-Image app bắt buộc: `GHCR_IMAGE@sha256:IMAGE_DIGEST` từ **run GĐ2 của bạn** cho `linux/amd64`, commit `COMMIT_SHA`; GĐ4 Azure sẽ dùng **cùng digest**. [GĐ2](GIAI_DOAN_02_IMAGE_VA_CI.md).
+Image app bắt buộc: `GHCR_IMAGE@sha256:IMAGE_DIGEST` từ **package version đã chọn ở GĐ2** cho `linux/amd64`, commit `COMMIT_SHA`; GĐ4 Azure sẽ dùng **cùng digest**. Package public có thể pull thẳng từ GHCR, không cần token. [GĐ2](GIAI_DOAN_02_IMAGE_VA_CI.md).
 
 Trước khi làm, chuẩn bị AWS account có quyền EC2/VPC/EIP/Billing, IP công khai của laptop để giới hạn SSH, và GitHub token **classic** có `read:packages` nếu package GHCR còn private. GitHub account của token phải được cấp quyền đọc package. Không đưa token, `.pem` hay secret vào repo hoặc screenshot. [GitHub Container Registry](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry).
 
@@ -187,7 +187,7 @@ sudo docker compose config -q
 
 ## 9. Pull image và chạy ứng dụng
 
-Nếu GHCR package private, nhập token trong SSH mà không viết token vào history/file:
+Nếu GHCR package **Private**, nhập token trong SSH mà không viết token vào history/file. Nếu **Public**, bỏ qua toàn bộ block login và đi thẳng tới `sudo docker compose pull`:
 
 ```bash
 read -rsp 'GHCR token: ' GHCR_TOKEN; echo

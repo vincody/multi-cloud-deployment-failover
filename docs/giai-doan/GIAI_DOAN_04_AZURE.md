@@ -36,7 +36,7 @@ Chọn **Review + create → Create**, đợi tạo xong rồi xác nhận `dcs2
 2. Tạo VM, disk, VNet/subnet, NSG và Static Public IP trong vùng được phép. Dùng SSH public key; giữ private key ngoài repo.
 3. SSH vào VM, cài Docker Engine + Compose plugin, bật Docker service.
 4. Tại `/opt/dcs29`, tạo `compose.yaml` và `nginx.conf` theo [mục 7 của hướng dẫn Portal](GIAI_DOAN_04_AZURE_PORTAL.md#7-tạo-compose-và-nginx). Dùng image GHCR cố định bằng digest `sha256:IMAGE_DIGEST`.
-5. Nếu GHCR private, đăng nhập bằng username có quyền đọc package và token classic `read:packages` qua `docker login --password-stdin`; không lưu token trong Markdown/ảnh. `docker compose pull`, `docker compose up -d --pull never`.
+5. Nếu GHCR package public, **không login**, chạy `sudo docker compose pull` rồi `sudo docker compose up -d --pull never`. Nếu private, đăng nhập bằng username có quyền đọc package và token classic `read:packages` qua `docker login --password-stdin` trước khi pull; không lưu token trong Markdown/ảnh.
 6. Kiểm tra `http://AZURE_PUBLIC_IP/health/ready`, `/version`, `/api/devices` và dashboard; reboot VM để xác nhận Compose tự chạy lại.
 7. Trước demo failover, bật **cả AWS EC2 lẫn Azure VM** và xác nhận health của cả hai. Sau demo có thể deallocate VM để dừng phí compute; disk/Public IP vẫn có thể phát sinh phí. [Microsoft: VM states/billing](https://learn.microsoft.com/en-us/azure/virtual-machines/states-billing).
 
@@ -44,7 +44,7 @@ Chọn **Review + create → Create**, đợi tạo xong rồi xác nhận `dcs2
 
 | Trường | Kỳ vọng Azure |
 |---|---|
-| `commit_sha` | `COMMIT_SHA` của run GĐ2 vừa chọn, giống AWS |
+| `commit_sha` | `COMMIT_SHA` của package version GĐ2 đã chọn, giống AWS |
 | `dataset_sha256` | Giá trị đầy đủ giống AWS; gọi `/version` của cả hai khi hai VM đang chạy |
 | `environment` | `azure-standby` |
 | `region` | `AZURE_REGION` đúng với Location VM |

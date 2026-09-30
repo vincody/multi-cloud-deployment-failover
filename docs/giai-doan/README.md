@@ -2,12 +2,12 @@
 
 Đề tài triển khai cùng một ứng dụng ở hai cloud độc lập: AWS là môi trường chính, Azure là môi trường dự phòng. Route 53 sẽ chuyển DNS khi AWS không còn healthy.
 
-**Bắt đầu tại [bảng thông số triển khai](THONG_SO_TRIEN_KHAI.md).** Các trang GĐ1–GĐ8 dùng ký hiệu như `YOUR_DOMAIN`, `AWS_PUBLIC_IP`, `GHCR_IMAGE` và `IMAGE_DIGEST`; mỗi người tự thay bằng giá trị của tài khoản, domain và lần build của mình. Không chạy lệnh hoặc lưu cấu hình với ký hiệu mẫu còn nguyên.
+**Bắt đầu tại [bảng thông số triển khai](THONG_SO_TRIEN_KHAI.md).** Các trang GĐ1–GĐ8 dùng ký hiệu như `YOUR_DOMAIN`, `AWS_PUBLIC_IP`, `GHCR_IMAGE` và `IMAGE_DIGEST`; mỗi người tự thay bằng giá trị của tài khoản, domain và package version đã chọn. Có thể pull package GHCR public của repo nguồn; nếu cần build/CI của chính nhóm mình, làm GĐ2 trên repo riêng. Không chạy lệnh hoặc lưu cấu hình với ký hiệu mẫu còn nguyên.
 
 | Giai đoạn | Điều kiện chuyển bước | Mục tiêu |
 |---|---|---|
 | [GĐ1](GIAI_DOAN_01_UNG_DUNG_LOCAL.md) | UI/API và test local pass trên máy bạn | Ứng dụng demo, API health/status, metrics và test local |
-| [GĐ2](GIAI_DOAN_02_IMAGE_VA_CI.md) | Actions run của bạn pass, ghi image/digest/commit | Build một image Linux AMD64, đẩy GHCR theo commit digest |
+| [GĐ2](GIAI_DOAN_02_IMAGE_VA_CI.md) | Chọn package đã phát hành hoặc Actions run của bạn; ghi image/digest/commit | Chốt một image Linux AMD64 cho cả hai VM |
 | [GĐ3](GIAI_DOAN_03_AWS_CONSOLE.md) | AWS origin HTTP/health/version pass, reboot pass | Deploy image lên AWS EC2 |
 | [GĐ4](GIAI_DOAN_04_AZURE.md) | Azure origin pass, cùng digest với AWS, reboot pass | Deploy ứng dụng lên Azure Ubuntu VM |
 | [GĐ5](GIAI_DOAN_05_DOMAIN_VA_HTTPS.md) | DNS origin, HTTPS/TLS và renewal pass trên hai VM | Một domain chung và HTTPS ở cả hai origin |

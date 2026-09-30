@@ -7,10 +7,10 @@ Hướng dẫn GĐ1–GĐ8 là **mẫu triển khai**, không chứa domain, IP,
 | Ký hiệu trong hướng dẫn | Tự lấy ở đâu | Cách dùng |
 |---|---|---|
 | `PATH_TO_REPO` | Đường dẫn thư mục bạn đã clone repo trên laptop | Thay trong `Set-Location` ở GĐ7; không dùng đường dẫn máy người khác |
-| `GHCR_IMAGE` | GĐ2: tên image trong GitHub Actions artifact `image-identity-*`, dạng `ghcr.io/<owner>/<repo>` | Cùng một image cho AWS và Azure |
+| `GHCR_IMAGE` | GĐ2: tên image ở **Packages → Container** của repo nguồn hoặc trong Actions artifact `image-identity-*`, dạng `ghcr.io/<owner>/<package>` | Cùng một image cho AWS và Azure |
 | `GHCR_OWNER` | GĐ2: tài khoản/tổ chức sở hữu package, phần `<owner>` của `GHCR_IMAGE` | Chỉ cần khi login để pull package private |
-| `IMAGE_DIGEST` | GĐ2: phần 64 ký tự hex sau `sha256:` trong artifact của run mới nhất đã pass | Cùng một digest cho AWS và Azure; không lấy digest từ một run khác |
-| `COMMIT_SHA` | GĐ2: commit của chính run tạo `IMAGE_DIGEST` | Đối chiếu `/version` trên hai origin |
+| `IMAGE_DIGEST` | GĐ2: phần 64 ký tự hex sau `sha256:` của **version package đã chọn** hoặc artifact của run tạo version đó | Cùng một digest cho AWS và Azure; không lấy digest từ version khác |
+| `COMMIT_SHA` | GĐ2: commit của run đã tạo `IMAGE_DIGEST` | Đối chiếu `/version` trên hai origin; khi dùng package có sẵn, đây là commit của repo nguồn |
 | `DATASET_SHA256` | GĐ1: đọc `/version` của image vừa build | Đối chiếu dữ liệu mẫu giữa hai origin; `DATASET_SHA256_PREFIX` là phần đầu cùng giá trị |
 | `AWS_REGION` | GĐ3: region bạn chọn trong AWS Console, ví dụ `ap-southeast-1` | Đặt `APP_REGION` của AWS theo đúng region EC2 |
 | `AZURE_REGION` | GĐ4: mã **Location** thật của Azure VM, ví dụ `indiasouthcentral` | Đặt `APP_REGION` của Azure theo đúng Location VM |
@@ -29,7 +29,7 @@ Ví dụ tên `aws-origin.YOUR_DOMAIN` trong các trang sau nghĩa là thay **to
 
 ## Thứ tự điền
 
-1. GĐ2: push source của **repo bạn**; đợi cả ba job Actions pass, tải artifact image identity và ghi `GHCR_IMAGE`, `IMAGE_DIGEST`, `COMMIT_SHA`. Nếu package GHCR public, VM có thể pull không cần token; nếu private, cấp quyền `read:packages` bằng phương án riêng, không lưu token trong repo.
+1. GĐ2: chọn **package GHCR đã phát hành của repo nguồn** hoặc tự chạy CI từ repo của bạn. Ghi `GHCR_IMAGE`, digest và commit của **cùng version**; dùng đúng version ấy ở cả hai VM. Nếu GHCR package public, VM pull không cần token; repo source public **không tự động chứng minh** package public. Nếu package private, cấp quyền `read:packages` bằng phương án riêng, không lưu token trong repo.
 2. GĐ3–GĐ4: chọn vùng được quota/policy cho phép, tạo hai VM và ghi hai public IP ổn định. Không dùng IP đã từng thuộc một lần triển khai khác.
 3. GĐ5: đăng ký hoặc dùng domain bạn sở hữu, tạo **một** public hosted zone. Sao chép bốn NS của chính zone đó sang nhà đăng ký; sau khi delegation hoạt động mới tạo A record origin, cấp certificate và cấu hình NGINX.
 4. GĐ6: tạo hai health check, ghi hai ID và gắn vào record failover đúng vai trò.

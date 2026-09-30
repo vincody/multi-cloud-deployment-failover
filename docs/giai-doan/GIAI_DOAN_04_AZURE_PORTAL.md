@@ -182,11 +182,22 @@ server {
 }
 ```
 
-Chạy `sudo docker compose config -q` rồi `sudo docker compose config --images` tại `/opt/dcs29`. Dòng image phải có tên owner thật viết chữ thường và **không còn `OWNER`**; nếu vẫn còn, sửa `compose.yaml` trước khi pull, nếu không Docker sẽ báo `invalid reference format`. App chỉ `expose` cổng 8080 trong mạng Docker; NGINX mới publish cổng 80. Không rebuild image trên Azure.
+Chạy `sudo docker compose config -q` rồi `sudo docker compose config --images` tại `/opt/dcs29`. Dòng image phải là đường dẫn GHCR thật kèm `@sha256:` và **không còn `GHCR_IMAGE` hay `IMAGE_DIGEST`**; nếu vẫn còn ký hiệu mẫu, sửa `compose.yaml` trước khi pull. App chỉ `expose` cổng 8080 trong mạng Docker; NGINX mới publish cổng 80. Không rebuild image trên Azure.
 
-## 8. Pull image private và chạy app
+## 8. Pull image và chạy app
 
-GHCR package hiện private. Trong SSH trên VM, nhập username GitHub có quyền đọc package và token classic có `read:packages` **từng bước**, không lưu credential vào tài liệu hoặc ảnh. Chạy lệnh đầu, nhập username; chạy lệnh hai, dán token khi terminal hỏi (token không hiện):
+Kiểm tra **package version đã chọn ở GĐ2**. Nếu package **Public**, trong SSH Azure VM chạy trực tiếp, không cần GitHub account hoặc token:
+
+```bash
+cd /opt/dcs29
+sudo docker compose pull
+sudo docker compose up -d --pull never
+sudo docker compose ps
+sudo docker compose logs --tail 100 app
+sudo docker compose exec nginx nginx -t
+```
+
+Nếu package **Private**, nhập username GitHub có quyền đọc package và token classic có `read:packages` **từng bước**, không lưu credential vào tài liệu hoặc ảnh. Chạy lệnh đầu, nhập username; chạy lệnh hai, dán token khi terminal hỏi (token không hiện):
 
 ```bash
 read -rp 'GitHub username: ' GHCR_USER
@@ -230,7 +241,7 @@ Invoke-RestMethod 'http://AZURE_PUBLIC_IP/api/devices'
 Test-NetConnection AZURE_PUBLIC_IP -Port 8080
 ```
 
-Mở `http://AZURE_PUBLIC_IP` để thấy dashboard. `/version` phải trả `environment=azure-standby`, `region=AZURE_REGION` theo Location VM, `commit_sha=COMMIT_SHA` đúng run GĐ2 và `dataset_sha256` đầy đủ giống AWS. Gọi `/version` và `/api/devices` ở cả hai VM trong cùng lượt. Cổng 8080 phải không truy cập được từ Internet. GĐ4 dùng HTTP; HTTPS ở GĐ5.
+Mở `http://AZURE_PUBLIC_IP` để thấy dashboard. `/version` phải trả `environment=azure-standby`, `region=AZURE_REGION` theo Location VM, `commit_sha=COMMIT_SHA` của package version GĐ2 đã chọn và `dataset_sha256` đầy đủ giống AWS. Gọi `/version` và `/api/devices` ở cả hai VM trong cùng lượt. Cổng 8080 phải không truy cập được từ Internet. GĐ4 dùng HTTP; HTTPS ở GĐ5.
 
 ### Tự nghiệm thu lần triển khai này
 

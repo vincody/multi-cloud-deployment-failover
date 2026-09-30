@@ -105,7 +105,7 @@ Nếu `/version` local chưa có Git SHA, kiểm tra đang chạy trong Git chec
 - Output `pytest`.
 - Response `/version`, `/health/ready` và mẫu `/metrics`.
 - Dataset fingerprint.
-- Commit source bạn dùng để build GĐ2.
+- Commit của package version đã chọn ở GĐ2; nếu tự build, đó là commit source của bạn.
 - Không lưu `.venv`, cache, `.env` thật hay token.
 
 ## 11. Checklist nghiệm thu
