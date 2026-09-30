@@ -104,7 +104,7 @@ Nhờ job này, cache/image local không thể làm bài kiểm tra pass giả.
 
 ## 6. Chọn package đã phát hành hoặc tự build
 
-**Dùng package có sẵn:** với chính repo này, đường dẫn package là `ghcr.io/vincody/multi-cloud-deployment-failover` (đây là đường dẫn image công khai, không phải domain/IP triển khai). Mở repo nguồn trên GitHub → **Packages** → container package → chọn version bạn muốn triển khai. Ghi đường dẫn đó vào `GHCR_IMAGE`, **digest `sha256:...` của version đã chọn** và commit/run đã tạo version vào [bảng thông số](THONG_SO_TRIEN_KHAI.md). Không chép một digest cố định từ tài liệu vì mỗi lần publish sẽ tạo version mới. Kiểm tra package hiển thị **Public**, rồi thử trên máy không login GHCR:
+**Dùng package có sẵn:** với chính repo này, đường dẫn package là `ghcr.io/vincody/multi-cloud-deployment-failover` (đây là đường dẫn image công khai, không phải domain/IP triển khai). Mở repo nguồn trên GitHub → **Packages** → container package → chọn version bạn muốn triển khai. Ghi đường dẫn đó vào `GHCR_IMAGE`, **digest `sha256:...` của version đã chọn** và commit/run đã tạo version vào [bảng thông số](THONG_SO_TRIEN_KHAI.md). Trong lệnh dưới, thay `GHCR_IMAGE` bằng đường dẫn package; thay `IMAGE_DIGEST` bằng **chỉ 64 ký tự sau `sha256:`**, vì lệnh đã chứa sẵn `@sha256:`. Có thể lấy digest từ `digest=` trong artifact `image-identity-*` của run tương ứng. Không chép một digest cố định từ tài liệu vì mỗi lần publish sẽ tạo version mới. Kiểm tra package hiển thị **Public**, rồi thử trên máy không login GHCR:
 
 ```powershell
 docker pull GHCR_IMAGE@sha256:IMAGE_DIGEST

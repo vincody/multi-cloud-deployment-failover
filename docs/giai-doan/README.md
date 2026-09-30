@@ -4,6 +4,8 @@
 
 **Bắt đầu tại [bảng thông số triển khai](THONG_SO_TRIEN_KHAI.md).** Các trang GĐ1–GĐ8 dùng ký hiệu như `YOUR_DOMAIN`, `AWS_PUBLIC_IP`, `GHCR_IMAGE` và `IMAGE_DIGEST`; mỗi người tự thay bằng giá trị của tài khoản, domain và package version đã chọn. Có thể pull package GHCR public của repo nguồn; nếu cần build/CI của chính nhóm mình, làm GĐ2 trên repo riêng. Không chạy lệnh hoặc lưu cấu hình với ký hiệu mẫu còn nguyên.
 
+**Cách đọc khối lệnh:** nhãn `powershell` chạy trên laptop Windows; nhãn `bash` chạy trong phiên SSH Ubuntu của VM được chỉ định. Các dòng lệnh độc lập chạy lần lượt từ trên xuống, chờ lệnh trước xong rồi mới tiếp tục. Khối có `<<EOF` phải dán nguyên từ dòng mở đầu tới dòng `EOF` đứng riêng; lệnh có `\` cuối dòng phải dán đủ các dòng của **cùng một lệnh**. Nội dung `yaml`, `nginx`, `json`, `ini` là cấu hình để dán vào file/editor hoặc Console theo lời dẫn, không chạy như lệnh shell. Xem hướng dẫn cụ thể tại bước tương ứng trước khi sao chép.
+
 | Giai đoạn | Điều kiện chuyển bước | Mục tiêu |
 |---|---|---|
 | [GĐ1](GIAI_DOAN_01_UNG_DUNG_LOCAL.md) | UI/API và test local pass trên máy bạn | Ứng dụng demo, API health/status, metrics và test local |

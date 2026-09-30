@@ -34,7 +34,7 @@ Quy trình chính dùng **Certbot + ACME DNS-01 + plugin Route 53**. Certbot ch�
 | CẢ HAI MÁY | Hai phiên SSH trên | Làm trên EC2 rồi lặp lại cùng lệnh trên Azure |
 | LAPTOP | PowerShell Windows, ngoài SSH | Kiểm tra DNS/HTTP/HTTPS của cả hai cloud |
 
-Lệnh giống nhau được ghi một lần với nhãn **CẢ HAI MÁY**. Lệnh/cấu hình khác nhau có block riêng cho EC2 và Azure. Chạy theo thứ tự từ trên xuống, dừng nếu có lỗi. Nội dung `nginx`, `yaml`, `ini` hoặc `sh` để dán vào editor/file được chỉ định, không phải chạy trực tiếp trong shell. Các lệnh Certbot nhiều dòng có dấu `\` phải copy cả lệnh; email mẫu thay bằng Gmail/email thật.
+Lệnh giống nhau được ghi một lần với nhãn **CẢ HAI MÁY**. Lệnh/cấu hình khác nhau có block riêng cho EC2 và Azure. Chạy theo thứ tự từ trên xuống, dừng nếu có lỗi. Nội dung `nginx`, `yaml`, `ini` hoặc `sh` để dán vào editor/file được chỉ định, không phải chạy trực tiếp trong shell. Với lệnh Bash có dấu `\` ở cuối dòng (Certbot, OpenSSL), thay ký hiệu mẫu rồi dán **cả lệnh từ dòng đầu tới dòng cuối** trong cùng phiên SSH; Bash sẽ chờ dòng tiếp theo cho đến khi gặp dòng không có `\`. Lệnh `sudo certbot certificates` và `date -u` là lệnh kiểm tra riêng, chạy sau khi lệnh trước hoàn tất.
 
 Trước khi kiểm tra endpoint, cả EC2 và Azure VM phải đang Running và container đã chạy. IP vẫn phân giải DNS được khi VM tắt, nhưng curl sẽ không kết nối được.
 

@@ -104,7 +104,9 @@ Nếu SSH timeout, kiểm tra VM đang **Running**, Public IP, rule TCP 22 của
 
 ## 6. Cài Docker trên VM
 
-Các lệnh sau chạy **trong SSH trên Azure VM**. Cài Docker Engine và Compose plugin theo [hướng dẫn chính thức cho Ubuntu](https://docs.docker.com/engine/install/ubuntu/):
+Các lệnh sau chạy **trong SSH trên Azure VM**, không chạy trong PowerShell laptop. Cài Docker Engine và Compose plugin theo [hướng dẫn chính thức cho Ubuntu](https://docs.docker.com/engine/install/ubuntu/) theo ba bước:
+
+**Bước 1 — chuẩn bị APT:** chạy từng dòng theo thứ tự; đợi lệnh hiện lại dấu nhắc shell rồi mới chạy dòng kế tiếp.
 
 ```bash
 sudo apt-get update
@@ -112,6 +114,11 @@ sudo apt-get install -y ca-certificates curl
 sudo install -m 0755 -d /etc/apt/keyrings
 sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
 sudo chmod a+r /etc/apt/keyrings/docker.asc
+```
+
+**Bước 2 — tạo file nguồn Docker:** sao chép và dán **toàn bộ khối từ `sudo tee ... <<EOF` đến dòng `EOF`** vào cùng phiên SSH, rồi nhấn Enter. `EOF` phải đứng **một mình ở đầu dòng**, không có khoảng trắng. Sau dòng đầu, shell có thể hiện dấu nhắc `>` để chờ các dòng tiếp theo; đó là bình thường. Đừng chạy riêng từng dòng `Types:`, `Suites:` hoặc `EOF`, và đừng dán dấu mở/đóng khối mã của Markdown. Lệnh `$(...)` và `${...}` được Ubuntu shell tính tại lúc tạo file.
+
+```bash
 sudo tee /etc/apt/sources.list.d/docker.sources >/dev/null <<EOF
 Types: deb
 URIs: https://download.docker.com/linux/ubuntu
@@ -120,6 +127,11 @@ Components: stable
 Architectures: $(dpkg --print-architecture)
 Signed-By: /etc/apt/keyrings/docker.asc
 EOF
+```
+
+**Bước 3 — cài và kiểm tra Docker:** chỉ bắt đầu sau khi bước 2 đã kết thúc và dấu nhắc shell trở lại. Chạy từng dòng; nếu lệnh lỗi, dừng và xử lý trước khi tiếp tục.
+
+```bash
 sudo apt-get update
 sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 sudo systemctl enable --now docker
@@ -127,6 +139,8 @@ sudo docker compose version
 ```
 
 Lệnh cuối phải in phiên bản Compose. Giữ cách dùng `sudo docker` như bên AWS; không cần thêm user vào nhóm `docker`.
+
+**Sau bước này mới chỉ cài Docker Engine/Compose.** `apt-get install` không tải ứng dụng từ GitHub/GHCR và không biết package version nào cần chạy. VM có thể pull image sau khi bạn điền `GHCR_IMAGE@sha256:IMAGE_DIGEST` vào `compose.yaml` ở mục 7, bảo đảm có Internet outbound, rồi chạy `sudo docker compose pull` ở mục 8 (package private cần login trước).
 
 ## 7. Tạo Compose và NGINX
 
@@ -136,7 +150,21 @@ cd /opt/dcs29
 sudo nano compose.yaml
 ```
 
-Dán nội dung này sau khi thay `GHCR_IMAGE`, `IMAGE_DIGEST` và `AZURE_REGION` bằng giá trị trong [bảng thông số](THONG_SO_TRIEN_KHAI.md). `APP_REGION` phải đúng mã **Location thực của VM**. Trong `nano`: `Ctrl+O`, Enter, `Ctrl+X`.
+**Điền dòng `image:` trước khi dán vào `compose.yaml`:**
+
+- Thay `GHCR_IMAGE` bằng đường dẫn package GHCR. Nếu dùng package public của **repo này**, điền `ghcr.io/vincody/multi-cloud-deployment-failover`. Nếu tự publish package, lấy giá trị `image=` trong artifact `image-identity-*` của run GĐ2.
+- Thay `IMAGE_DIGEST` bằng **64 ký tự hex đứng sau `sha256:`** của đúng package version đã chọn ở GĐ2. Ví dụ, nếu artifact ghi `digest=sha256:<64 ký tự hex>`, chỉ lấy phần `<64 ký tự hex>`; dòng mẫu đã có sẵn `@sha256:`. Không dán nguyên chuỗi `sha256:...` vào vị trí `IMAGE_DIGEST`.
+- Dòng hoàn chỉnh phải có dạng `image: ghcr.io/<owner>/<package>@sha256:<64 ký tự hex thật>`, không còn chữ `GHCR_IMAGE` hoặc `IMAGE_DIGEST`. Dùng **y hệt** image và digest đã điền trên AWS.
+
+**Muốn dùng ngay package public của repo này:** sao chép nguyên dòng dưới và thay cho dòng `image: GHCR_IMAGE@sha256:IMAGE_DIGEST` trong mẫu Compose kế tiếp:
+
+```yaml
+    image: ghcr.io/vincody/multi-cloud-deployment-failover@sha256:a95fa59edf6eab061eb9b5c81bbc6020dd8bc1fc463cfb2ace82911e47664079
+```
+
+Digest này được đối chiếu với tag `main` trên GHCR ngày 30/09/2026. Nó ghim **version đã kiểm tra**, không tự đổi theo các lần publish sau. Nếu muốn version khác, lấy digest của version đó theo GĐ2; Azure phải dùng **cùng dòng `image:`** với AWS.
+
+Sau khi thay cả `AZURE_REGION` bằng mã **Location thực của VM**, dán YAML vào `compose.yaml`. Trong `nano`: `Ctrl+O`, Enter, `Ctrl+X`.
 
 ```yaml
 services:
@@ -186,7 +214,9 @@ Chạy `sudo docker compose config -q` rồi `sudo docker compose config --image
 
 ## 8. Pull image và chạy app
 
-Kiểm tra **package version đã chọn ở GĐ2**. Nếu package **Public**, trong SSH Azure VM chạy trực tiếp, không cần GitHub account hoặc token:
+Kiểm tra **package version đã chọn ở GĐ2**. `sudo docker compose pull` tải image ứng dụng **đúng digest trong `compose.yaml`** cùng image NGINX; nó không tự chọn package mới nhất của repo. `sudo docker compose up -d --pull never` chỉ chạy các image đã tải, không pull thêm. Khi có bản phát hành mới, lấy digest mới ở GĐ2, sửa `compose.yaml` rồi chạy lại hai lệnh này trên **cả AWS và Azure** để giữ cùng version.
+
+Nếu package **Public**, trong SSH Azure VM chạy trực tiếp, không cần GitHub account hoặc token:
 
 ```bash
 cd /opt/dcs29
