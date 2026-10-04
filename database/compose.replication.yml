@@ -1,0 +1,38 @@
+name: hetinhtoanphanbo
+services:
+  database:
+    image: postgres:17
+    command: ["postgres", "-c", "wal_level=replica", "-c", "max_wal_senders=10", "-c", "wal_keep_size=128MB"]
+    environment:
+      POSTGRES_DB: taskflow
+      POSTGRES_USER: taskflow
+      POSTGRES_PASSWORD: local-demo-only
+    ports:
+      - "127.0.0.1:${AWS_DB_PORT:-55432}:5432"
+    volumes:
+      - taskflow-local:/var/lib/postgresql/data
+      - ./replication:/replication:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U taskflow -d taskflow"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+  database-azure:
+    image: postgres:17
+    entrypoint: ["bash", "/replication/standby.sh"]
+    environment:
+      PGDATA: /var/lib/postgresql/data/standby
+      PGPASSWORD: local-replication-only
+    ports:
+      - "127.0.0.1:${AZURE_DB_PORT:-55433}:5432"
+    volumes:
+      - taskflow-azure:/var/lib/postgresql/data
+      - ./replication:/replication:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U taskflow -d taskflow"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+volumes:
+  taskflow-local:
+  taskflow-azure:

@@ -18,6 +18,9 @@ from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
+from app.tasks import router as tasks_router
+from app.issues import router as issues_router
+from database.role import router as database_router
 
 APP_DIR = Path(__file__).resolve().parent
 DATASET_PATH = APP_DIR / "data" / "devices.json"
@@ -217,4 +220,7 @@ async def metrics() -> Response:
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
+app.include_router(tasks_router)
+app.include_router(issues_router)
+app.include_router(database_router)
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")

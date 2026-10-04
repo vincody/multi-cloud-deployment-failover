@@ -1,0 +1,111 @@
+"""Full shared-URL AWS -> Azure -> AWS proof, isolated from user data."""
+import os
+from pathlib import Path
+import subprocess
+import sys
+import time
+from uuid import uuid4
+
+import httpx
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+os.environ.update(LOCAL_REPL_PROJECT="dcs29-cycle-" + uuid4().hex[:8], AWS_DB_PORT="55632", AZURE_DB_PORT="55633",
+                  AWS_WEB_PORT="18080", AZURE_WEB_PORT="18081", PROXY_WEB_PORT="18090", LOCAL_REPL_DB_ONLY="0")
+from scripts import local_replication as demo
+from database.local_state import read_state
+
+processes = []
+base = "http://127.0.0.1:18090"
+
+
+def start_app(module, port, env):
+    demo.STATE.mkdir(parents=True, exist_ok=True)
+    with (demo.STATE / f"proof-{port}.log").open("a", encoding="utf-8") as log:
+        process = subprocess.Popen([sys.executable, "-m", "uvicorn", module, "--host", "127.0.0.1", "--port", str(port)],
+                                   cwd=ROOT, env=os.environ | env, stdout=log, stderr=log,
+                                   creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+    processes.append(process)
+    until = time.monotonic() + 15
+    while time.monotonic() < until:
+        if process.poll() is not None:
+            raise RuntimeError(f"Proof app {port} exited; inspect its log")
+        try:
+            if httpx.get(f"http://127.0.0.1:{port}/" if module == "app.local_proxy:app" else f"http://127.0.0.1:{port}/api/status", timeout=1, trust_env=False).status_code in (200,307):
+                return
+        except httpx.HTTPError:
+            pass
+        time.sleep(.2)
+    raise RuntimeError("Proof app did not start")
+
+
+def request(method, path, body=None, cloud=None):
+    result = httpx.request(method, base + path, json=body, timeout=15, trust_env=False)
+    assert result.status_code == 200, result.text
+    if cloud:
+        assert result.headers["x-served-by"] == cloud
+        assert result.headers["x-local-proxy-origin"] == cloud
+    return result.json()
+
+
+def compare_issue(issue_id):
+    path = f"/api/issues/{issue_id}"
+    aws = httpx.get("http://127.0.0.1:18080" + path, trust_env=False).json()
+    until = time.monotonic() + 15
+    while time.monotonic() < until:
+        azure = httpx.get("http://127.0.0.1:18081" + path, trust_env=False).json()
+        if aws == azure:
+            return
+        time.sleep(.2)
+    raise AssertionError("issue, comments and history differ")
+
+
+try:
+    demo.setup()
+    start_app("app.main:app", 18080, {"APP_ENV": "aws", "DATABASE_URL": demo.dsn(demo.AWS_DB)})
+    start_app("app.main:app", 18081, {"APP_ENV": "azure", "DATABASE_URL": demo.dsn(demo.AZURE_DB)})
+    start_app("app.local_proxy:app", 18090, {})
+    body = {"request_id": str(uuid4()), "author": "Demo", "title": "Vòng failover/failback", "description": "Tạo trên AWS", "status": "open", "version": 0}
+    issue = request("POST", "/api/issues", body, "aws")
+    path = f"/api/issues/{issue['id']}"
+    aws_comment = {"request_id": str(uuid4()), "author": "AWS", "body": "Trước failover"}
+    request("POST", path + "/comments", aws_comment, "aws")
+    compare_issue(issue["id"])
+    demo.failover()
+    assert request("GET", "/api/database/status", cloud="azure")["writable"]
+    azure_comment = {"request_id": str(uuid4()), "author": "Azure", "body": "Phát sinh khi AWS dừng"}
+    first = request("POST", path + "/comments", azure_comment, "azure")
+    assert request("POST", path + "/comments", azure_comment, "azure") == first
+    request("PUT", path, body | {"request_id": str(uuid4()), "version": 1, "status": "closed"}, "azure")
+    demo.rejoin_aws()
+    assert demo.role(demo.AWS_DB)
+    compare_issue(issue["id"])
+    before = request("GET", path, cloud="azure")
+    assert before["issue"]["status"] == "closed" and len(before["comments"]) == 2
+    demo.failback()
+    after = request("GET", path, cloud="aws")
+    assert before == after
+    assert len(after["history"]) == 4
+    assert not demo.role(demo.AWS_DB) and demo.role(demo.AZURE_DB)
+    compare_issue(issue["id"])
+    request("POST", path + "/comments", {"request_id": str(uuid4()), "author": "AWS", "body": "Sau failback"}, "aws")
+    compare_issue(issue["id"])
+    archives = read_state()["archives"]
+    assert len(archives) == 2
+    for archive in archives:
+        subprocess.run(["docker", "volume", "inspect", archive["volume"]], check=True, capture_output=True)
+    # Repeating failback/rejoin must not create extra volume copies in a healthy state.
+    demo.failback()
+    assert read_state()["archives"] == archives
+    # A second cycle exercises persisted Compose overrides, not just the initial volumes.
+    demo.failover()
+    demo.failback()
+    compare_issue(issue["id"])
+    print("PASS: one URL, proxy switches, AWS/Azure writes, retry, full data/history preservation, archived volumes, repeat cycle")
+finally:
+    for process in reversed(processes):
+        if process.poll() is None:
+            process.terminate()
+            process.wait(timeout=10)
+    if demo.PROJECT.startswith("dcs29-cycle-"):
+        demo.compose("down", "--volumes")

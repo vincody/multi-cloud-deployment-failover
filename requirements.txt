@@ -1,3 +1,5 @@
 fastapi==0.141.1
+httpx==0.28.1
+psycopg[binary]==3.3.6
 prometheus-client==0.26.0
 uvicorn[standard]==0.53.0

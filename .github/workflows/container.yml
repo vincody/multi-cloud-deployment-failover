@@ -17,6 +17,23 @@ env:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: taskflow
+          POSTGRES_PASSWORD: local-demo-only
+          POSTGRES_DB: taskflow
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U taskflow -d taskflow"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TASKFLOW_DB_TESTS: "1"
+      DATABASE_URL: postgresql://taskflow:local-demo-only@127.0.0.1:55432/taskflow
     steps:
       - name: Check out source
         uses: actions/checkout@v4
