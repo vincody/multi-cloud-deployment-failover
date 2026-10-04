@@ -1,70 +1,132 @@
-# DCS29 Multi-Cloud Failover Dashboard
+# DCS29 — Multi-Cloud Issues & Disaster Recovery
 
-Project #29 runs one application on AWS EC2 (primary) and an Azure Ubuntu VM (standby). Route 53 switches the shared hostname to the healthy origin during failover.
+Đồ án mô phỏng hệ thống ticket hỗ trợ theo kiểu GitHub Issues, với ứng dụng và PostgreSQL riêng tại hai môi trường AWS/Azure. Mục tiêu là tiếp tục phục vụ người dùng sau sự cố và chuyển về môi trường chính sau khi dữ liệu được tái đồng bộ.
 
-## Current state
+## Trạng thái hiện tại
 
-This repository contains the app, CI image workflow, and step-by-step guides for AWS EC2 primary, Azure VM standby, HTTPS, Route 53 failover, and laptop-based monitoring. The dashboard shows the serving cloud, region, uptime, and `/api/devices` workload metrics from the last 60 seconds. Every deployment must create its **own** cloud resources and use its **own** domain, IPs, and image digest. Start with the [deployment worksheet](docs/giai-doan/THONG_SO_TRIEN_KHAI.md), then follow the [stages](docs/giai-doan/README.md).
+- Giao diện Issues: tạo/sửa ticket, đóng/mở lại, bình luận, tìm kiếm và lịch sử hoạt động từ database.
+- Hai backend local AWS/Azure, kết nối hai PostgreSQL 17 dùng physical streaming replication bất đồng bộ.
+- Một URL chung qua proxy local; hiển thị môi trường đang phục vụ và vai trò database.
+- Failover, tái đồng bộ AWS và failback bằng lệnh; khóa ghi, chờ giao dịch ứng dụng kết thúc và cô lập primary cũ trước khi promote.
+- Bản nháp lưu trong trình duyệt, kiểm tra version khi sửa và mã yêu cầu chống ghi trùng khi retry.
+- CI kiểm thử với PostgreSQL, build image Linux AMD64, phát hành GHCR và kéo lại image để kiểm tra runtime.
 
-## Project layout and planned artifacts
+**Bản Issues với database hiện được kiểm chứng ở môi trường local.** Triển khai bản này trên hai VM AWS/Azure, K3s, giám sát độc lập và tự động phát hiện sự cố là các bước tiếp theo. Các hướng dẫn cloud cũ dành cho dashboard được giữ để tham khảo.
 
-```text
-app/                 Application source, UI, sample data, and metrics
-deploy/aws/          EC2, NGINX, and Docker Compose configuration
-deploy/azure/        Azure VM configuration or scripts, if added
-deploy/dns/          Route 53 configuration notes or infrastructure code
-observability/       Prometheus, Blackbox Exporter, and Grafana assets
-tests/load/          k6 traffic and failover scenarios
-experiments/         Run manifests, raw results, and analysis artifacts
-docs/                Project analysis and supporting documentation
-.github/workflows/   CI workflows
-```
+## Chạy demo local
 
-## Documentation
-
-- [Architecture and workflow](images/ARCHITECTURE.md)
-- [AWS Console deployment](docs/giai-doan/GIAI_DOAN_03_AWS_CONSOLE.md)
-- [Azure Portal deployment and verification](docs/giai-doan/GIAI_DOAN_04_AZURE_PORTAL.md)
-- [Implementation stages and current progress](docs/giai-doan/README.md)
-- [Vietnamese deployment guide entry point](HUONG_DAN_29_AWS_AZURE_DEPLOY_VA_KIEM_THU.md)
-
-## Run locally
-
-Create the local Python environment and install the test/runtime dependencies:
+Cần Python 3.12 và Docker Desktop đang chạy Linux containers. Chạy PowerShell tại thư mục gốc repo:
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\python -m pip install -r requirements-dev.txt
+.venv/Scripts/python.exe -m pip install -r requirements-dev.txt
+.venv/Scripts/python.exe scripts/local_replication.py setup
+.venv/Scripts/python.exe scripts/local_replication.py start-web
+.venv/Scripts/python.exe scripts/local_replication.py start-proxy
 ```
 
-Start the dashboard, then open `http://127.0.0.1:8080` in a browser:
+Mở **http://127.0.0.1:8090/issues.html** và giữ URL này trong toàn bộ demo.
+
+| Thành phần | Địa chỉ local | Vai trò ban đầu |
+|---|---|---|
+| Proxy chung | `127.0.0.1:8090` | Chuyển yêu cầu tới AWS |
+| Backend AWS | `127.0.0.1:8080/issues.html` | Kết nối primary |
+| Backend Azure | `127.0.0.1:8081/issues.html` | Kết nối standby, chỉ đọc |
+| PostgreSQL AWS | `127.0.0.1:55432` | Primary, đọc/ghi |
+| PostgreSQL Azure | `127.0.0.1:55433` | Standby, nhận WAL từ AWS |
+
+`start-web` và `start-proxy` chạy dưới nền, lưu PID/log tại `.local-replication/hetinhtoanphanbo/`. Nếu cổng đã được sử dụng, lệnh từ chối khởi động; xem [hướng dẫn replication](docs/LOCAL_REPLICATION.md) để quản lý tiến trình. `setup` giữ dữ liệu primary hiện có và có thể khởi động lại container để cập nhật cấu hình WAL.
+
+### Thử failover và failback
+
+1. Tạo issue và bình luận qua cổng 8090; đối chiếu dữ liệu trên web Azure cổng 8081.
+2. Chuyển sang Azure:
+
+   ```powershell
+   .venv/Scripts/python.exe scripts/local_replication.py failover
+   ```
+
+3. Giữ URL 8090, kiểm tra nhãn Azure rồi sửa issue hoặc gửi thêm bình luận.
+4. Dựng lại AWS thành standby của Azure và kiểm tra đồng bộ:
+
+   ```powershell
+   .venv/Scripts/python.exe scripts/local_replication.py rejoin-aws
+   .venv/Scripts/python.exe scripts/local_replication.py status
+   ```
+
+5. Chuyển về AWS:
+
+   ```powershell
+   .venv/Scripts/python.exe scripts/local_replication.py failback
+   ```
+
+`failback` tự thực hiện rejoin nếu cần. Sau khi hoàn tất, proxy phục vụ AWS và Azure trở lại standby streaming. Khi dựng lại standby, script tạo volume mới và giữ volume cũ để đối chiếu; không chạy `docker compose down -v` nếu muốn giữ dữ liệu.
+
+Trong lúc chuyển primary, proxy tạm trả 503. Bản nháp chưa gửi nằm trong localStorage của trình duyệt và được khôi phục khi tải lại cùng origin; nó chưa phải dữ liệu đã lưu vào PostgreSQL. Replication bất đồng bộ có thể mất các giao dịch cuối nếu primary sập bất ngờ; demo không cam kết RPO bằng 0. Không tự khởi động primary cũ sau failover; dùng quy trình rejoin/failback.
+
+## Image và GitHub Actions
+
+Image ứng dụng: `ghcr.io/vincody/multi-cloud-deployment-failover`.
+
+```bash
+docker pull ghcr.io/vincody/multi-cloud-deployment-failover:main
+```
+
+[Workflow container](.github/workflows/container.yml) chạy khi push lên `main`, push tag `v*` hoặc mở pull request. Pull request chỉ kiểm thử/build; push phát hành các tag tương ứng `main`, `sha-<commit>` hoặc tag phiên bản. Workflow lưu digest trong artifact `image-identity-<commit>` và kiểm tra image đã phát hành bằng một lần kéo/chạy riêng.
+
+AWS và Azure dùng cùng image ứng dụng, cấu hình riêng bằng `APP_ENV`, `APP_REGION` và `DATABASE_URL`. Khi triển khai, dùng **cùng digest** ở cả hai bên để bảo đảm cùng phiên bản; tag `main` có thể thay đổi. PostgreSQL chạy riêng, dữ liệu nằm trong Docker volume; kéo image ứng dụng không tự tạo database hay cấu hình replication.
+
+Build thử trên máy:
 
 ```powershell
-.\.venv\Scripts\python -m uvicorn app.main:app --host 127.0.0.1 --port 8080
+docker build --platform linux/amd64 -t dcs29-issues:local .
 ```
 
-Run the automated API checks:
+## Kiểm thử
+
+Sau khi database local đã được khởi tạo:
 
 ```powershell
-.\.venv\Scripts\python -m pytest -q
+$env:TASKFLOW_DB_TESTS='1'
+.venv/Scripts/python.exe -m pytest -q -p no:cacheprovider
+.venv/Scripts/python.exe scripts/check_local_lifecycle.py
 ```
 
-Useful endpoints: `/api/status`, `/api/devices`, `/health/live`, `/health/ready`, `/version`, and `/metrics`.
+Các test database dùng schema riêng. Script lifecycle dựng project Docker riêng, chạy hai vòng failover/failback qua proxy, kiểm tra dữ liệu issue/bình luận/lịch sử, retry và việc giữ volume cũ; chỉ dọn tài nguyên của project kiểm thử. Các cổng `55632/55633`, `18080/18081` và `18090` phải trống.
 
-The dashboard polls `/api/status` every five seconds. Request rate, app error rate, and app p95 latency cover `/api/devices` traffic only; an idle app shows no workload error rate or p95 value. Browser-to-API latency is measured separately in the browser.
+## API chính
 
-## Build and publish the container
+| Endpoint | Mục đích |
+|---|---|
+| `/api/issues` | Danh sách và tạo issue |
+| `/api/issues/{id}` | Chi tiết, cập nhật issue, đọc bình luận và lịch sử |
+| `/api/issues/{id}/comments` | Gửi bình luận |
+| `/api/status` | Môi trường và trạng thái ứng dụng |
+| `/api/database/status` | Vai trò, kết nối và khả năng ghi của database |
+| `/health/database` | Trả 200 khi database kết nối được và cho phép ghi |
+| `/api/proxy/status` | Writer và phase của proxy, chỉ có trên cổng 8090 |
+| `/version` | Phiên bản và commit ứng dụng |
 
-Build and smoke-test a Linux AMD64 image locally:
+Dashboard cũ tại `/` vẫn có `/api/devices`, `/metrics`, `/health/live` và `/health/ready`. `/health/ready` kiểm tra dataset dashboard; dùng `/health/database` khi kiểm tra khả năng phục vụ ghi của bản Issues. Metric workload cũ chỉ đo lưu lượng `/api/devices`.
 
-```powershell
-docker build --platform linux/amd64 -t dcs29-local:check .
-docker run --rm -d --name dcs29-check -p 18080:8080 dcs29-local:check
-Invoke-WebRequest -UseBasicParsing http://127.0.0.1:18080/health/ready
-Invoke-WebRequest -UseBasicParsing http://127.0.0.1:18080/version
-docker stop dcs29-check
+## Cấu trúc và tài liệu
+
+```text
+app/                 FastAPI, giao diện Issues và proxy local
+database/            Kết nối, truy vấn, schema, Compose và script replication
+scripts/             Điều phối và kiểm chứng failover/failback local
+tests/               Kiểm thử API, database và proxy
+docs/                Hướng dẫn local và kế hoạch triển khai
+deploy/              Cấu hình triển khai dashboard cloud trước đây
+observability/       Cấu hình Prometheus, Blackbox Exporter và Grafana
+.github/workflows/   Kiểm thử, build và phát hành image
 ```
 
-Pushing a commit to `main` runs [the container workflow](.github/workflows/container.yml): API tests, a Linux AMD64 build, publication to `ghcr.io/<your-owner>/<your-repo>`, and a clean-pull runtime check. The workflow publishes `main` and `sha-<commit>` tags and records the immutable image digest as a run artifact. Fill `GHCR_IMAGE` and `IMAGE_DIGEST` in the deployment worksheet from **your run**, then deploy the **same digest** to AWS and Azure; do not use a mutable tag as evidence that both origins run identical code.
+- [Failover, replication và failback local](docs/LOCAL_REPLICATION.md)
+- [Nghiệp vụ Issues và chế độ một database](docs/LOCAL_ISSUES.md)
+- [Cấu trúc database](database/README.md)
+- [Phương án Kubernetes và database đa cloud](docs/PHUONG_AN_NANG_CAP_KUBERNETES_DATABASE.md)
+- [Các giai đoạn triển khai dashboard cloud trước đây](docs/giai-doan/README.md)
+- [Thông số triển khai cloud](docs/giai-doan/THONG_SO_TRIEN_KHAI.md)
 
-Do not commit `.env` files, cloud credentials, private keys, certificates, or Terraform state. The repository ignores common secret and local-state paths, but review staged files before every push.
+Tên người gửi hiện được nhập trực tiếp, chưa có xác thực/phân quyền. Tài khoản và mật khẩu trong Compose chỉ dành cho demo local. Không commit credential, file `.env`, private key, Terraform state hoặc dữ liệu runtime.
