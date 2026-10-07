@@ -1,0 +1,79 @@
+#!/bin/bash
+set -euo pipefail
+export DEBIAN_FRONTEND=noninteractive
+apt-get -o Acquire::Retries=5 update
+apt-get -o Acquire::Retries=5 install -y ca-certificates curl python3
+install -d -m 700 /etc/rancher/k3s
+cat > /etc/rancher/k3s/config.yaml <<'CONFIG'
+write-kubeconfig-mode: "0600"
+node-name: issues-${app_env}
+node-label:
+  - cloud=${app_env}
+CONFIG
+curl --fail --show-error --location --retry 5 https://get.k3s.io -o /root/install-k3s.sh
+INSTALL_K3S_VERSION='${k3s_version}' sh /root/install-k3s.sh
+k3s kubectl wait --for=condition=Ready node/issues-${app_env} --timeout=300s
+k3s kubectl create namespace issues --dry-run=client -o yaml | k3s kubectl apply -f -
+
+# Stage outside the auto-apply directory: database and secrets must exist first.
+install -d -m 750 /opt/dcs29
+cat > /opt/dcs29/issues-app.yaml <<'MANIFEST'
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: issues-app
+  namespace: issues
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: issues-app}
+  template:
+    metadata:
+      labels: {app: issues-app}
+    spec:
+      containers:
+        - name: app
+          image: ${image_ref}
+          ports:
+            - {name: http, containerPort: 8080}
+          env:
+            - {name: APP_ENV, value: "${app_env}"}
+            - {name: APP_REGION, value: "${app_region}"}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: {name: issues-db, key: DATABASE_URL}
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 512Mi}
+          startupProbe:
+            httpGet: {path: /health/live, port: http}
+            failureThreshold: 30
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /health/live, port: http}
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: {path: /api/database/status, port: http}
+            periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: issues-app
+  namespace: issues
+spec:
+  selector: {app: issues-app}
+  ports:
+    - {name: http, port: 80, targetPort: http}
+MANIFEST
+cat > /opt/dcs29/README.txt <<'NOTES'
+K3s installed. Terraform workload automation deploys WireGuard, PostgreSQL and Issues over SSH.
+If enable_workload_automation=false, only the app manifest is staged; deploy manually.
+After successful automation see /opt/dcs29/automation-result.json.
+HTTPS/renewal are automated when enable_https=true after DNS delegation.
+Monitoring, backup and failover/failback remain separate steps.
+AWS /health/database -> 200; Azure standby -> 503 (expected).
+Startup guard requires checking writer roles before starting K3s after reboot.
+Never promote before fencing the previous writer. DNS does not promote databases.
+NOTES
+chmod 640 /opt/dcs29/issues-app.yaml /opt/dcs29/README.txt

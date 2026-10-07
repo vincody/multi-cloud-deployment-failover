@@ -11,7 +11,7 @@
 - Bản nháp lưu trong trình duyệt, kiểm tra version khi sửa và mã yêu cầu chống ghi trùng khi retry.
 - CI kiểm thử với PostgreSQL, build image Linux AMD64, phát hành GHCR và kéo lại image để kiểm tra runtime.
 
-**Bản Issues với database hiện được kiểm chứng ở môi trường local.** Triển khai bản này trên hai VM AWS/Azure, K3s, giám sát độc lập và tự động phát hiện sự cố là các bước tiếp theo. Các hướng dẫn cloud cũ dành cho dashboard được giữ để tham khảo.
+**Bản Issues với database hiện được kiểm chứng ở môi trường local.** Nhánh [Terraform tự động](docs/giai-doan/tu_dong/TRIEN_KHAI_BANG_TERRAFORM.md) đã có automation K3s, WireGuard, PostgreSQL AWS primary/Azure standby, app và HTTPS/renewal; cần chạy nghiệm thu trên hai VM thật. Đã bổ sung [GĐ6B failover tự động](docs/giai-doan/tu_dong/AUTOMATION_FAILOVER.md) bằng CloudWatch/EventBridge/Step Functions/Lambda và SSM Azure, mặc định tắt; chưa nghiệm thu trên cloud. Giám sát độc lập, rejoin và failback vẫn cần thực hiện theo runbook. Các hướng dẫn cloud cũ dành cho dashboard được giữ để tham khảo.
 
 ## Chạy demo local
 
@@ -126,7 +126,7 @@ observability/       Cấu hình Prometheus, Blackbox Exporter và Grafana
 - [Nghiệp vụ Issues và chế độ một database](docs/LOCAL_ISSUES.md)
 - [Cấu trúc database](database/README.md)
 - [Phương án Kubernetes và database đa cloud](docs/PHUONG_AN_NANG_CAP_KUBERNETES_DATABASE.md)
-- [Các giai đoạn triển khai dashboard cloud trước đây](docs/giai-doan/README.md)
-- [Thông số triển khai cloud](docs/giai-doan/THONG_SO_TRIEN_KHAI.md)
+- [Các giai đoạn triển khai dashboard cloud trước đây](docs/giai-doan/thu_cong/README.md)
+- [Thông số triển khai cloud](docs/giai-doan/thu_cong/THONG_SO_TRIEN_KHAI.md)
 
 Tên người gửi hiện được nhập trực tiếp, chưa có xác thực/phân quyền. Tài khoản và mật khẩu trong Compose chỉ dành cho demo local. Không commit credential, file `.env`, private key, Terraform state hoặc dữ liệu runtime.

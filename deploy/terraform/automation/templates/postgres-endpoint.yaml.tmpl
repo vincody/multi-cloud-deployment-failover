@@ -1,0 +1,17 @@
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: postgres-tunnel
+  namespace: issues
+  labels:
+    kubernetes.io/service-name: postgres
+addressType: IPv4
+ports:
+- name: postgres
+  protocol: TCP
+  port: 5432
+endpoints:
+- addresses:
+  - __LOCAL_IP__
+  conditions:
+    ready: true

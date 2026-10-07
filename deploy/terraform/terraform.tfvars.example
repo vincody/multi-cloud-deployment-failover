@@ -1,0 +1,43 @@
+# Copy to terraform.tfvars. The real file is ignored by Git.
+# The image digest must be taken from ONE successful GHCR package version.
+aws_region            = "ap-southeast-1"
+azure_region          = "indiasouthcentral"
+azure_subscription_id = "REPLACE-WITH-YOUR-SUBSCRIPTION-UUID"
+domain_name           = "your-domain.example"
+ssh_public_key        = "ssh-ed25519 REPLACE-WITH-YOUR-PUBLIC-KEY your-laptop"
+ssh_cidr              = "203.0.113.10/32"
+ghcr_image            = "ghcr.io/vincody/multi-cloud-deployment-failover"
+image_digest          = "REPLACE-WITH-64-LOWERCASE-HEX-CHARACTERS"
+
+# Choose x86-64 sizes available in your region/subscription.
+aws_instance_type = "t3.medium"
+azure_vm_size     = "Standard_B2s"
+
+# Select one exact published K3s release after reviewing its release notes.
+k3s_version = "REPLACE-WITH-EXACT-K3S-RELEASE"
+aws_root_volume_size = 30
+# Increase if the Ubuntu image requires a larger OS disk.
+azure_os_disk_size = 30
+
+# Python 3.10+, OpenSSH ssh on the operator laptop; key contents stay outside Terraform.
+enable_workload_automation = true
+ssh_private_key_path = "C:/Users/YOUR_USER/.ssh/dcs29_terraform"
+postgres_image = "postgres@sha256:REPLACE-WITH-POSTGRES-17-BOOKWORM-DIGEST"
+automation_python = "python"
+standby_storage_generation = "initial"
+# Enable only after updating registrar nameservers and public DNS propagation.
+enable_https = false
+certificate_email = ""
+# Path to a private INI [default] file with the DNS-only Azure IAM user's key.
+# Empty reuses /root/.aws/credentials if already configured on Azure.
+azure_dns_credentials_file = ""
+aws_cpu_credits = "standard"
+
+# Set checks true after TLS and DB replication work. Standby is intentionally Unhealthy.
+enable_health_checks = false
+# Enable DNS only after testing fencing/promote/rejoin. DNS does not promote the DB.
+enable_failover = false
+
+# GĐ6B only: complete manual fencing/promote/rejoin/failback and baseline checks first.
+# Adds CloudWatch/EventBridge/Step Functions/Lambda + Azure SSM hybrid registration.
+enable_auto_failover = false

@@ -1,16 +1,32 @@
 # Giai đoạn 5 — Domain chung và HTTPS trên AWS EC2 / Azure VM
 
-**Đầu vào:** GĐ3/GĐ4 đã pass HTTP trên hai origin. Điền `YOUR_DOMAIN`, `AWS_PUBLIC_IP`, `AZURE_PUBLIC_IP`, `AWS_REGION`, `AZURE_REGION`, `CERT_EMAIL` trong [bảng thông số](THONG_SO_TRIEN_KHAI.md). Domain phải thuộc quyền quản lý của bạn; thay mọi ký hiệu mẫu trước khi nhập vào Console, NGINX hoặc chạy lệnh. `aws-origin.YOUR_DOMAIN`, `azure-origin.YOUR_DOMAIN`, `app.YOUR_DOMAIN` là ba hostname nằm trong **cùng một domain**, không phải ba domain phải mua.
+**Đầu vào:** GĐ3/GĐ4 đã pass HTTP trên hai origin. Điền `YOUR_DOMAIN`, `AWS_PUBLIC_IP`, `AZURE_PUBLIC_IP`, `AWS_REGION`, `AZURE_REGION`, `CERT_EMAIL` trong [bảng thông số](THONG_SO_TRIEN_KHAI.md). Domain phải thuộc quyền quản lý của bạn; thay mọi ký hiệu mẫu trước khi nhập vào Console, Ingress hoặc chạy lệnh. `aws-origin.YOUR_DOMAIN`, `azure-origin.YOUR_DOMAIN`, `app.YOUR_DOMAIN` là ba hostname nằm trong **cùng một domain**, không phải ba domain phải mua.
 
 **Mục tiêu:** cả hai VM có HTTPS hợp lệ cho hostname origin riêng và hostname chung `app.YOUR_DOMAIN` trước khi GĐ6 tạo DNS failover. AWS dùng IAM role cho Certbot DNS-01; Azure dùng credential DNS giới hạn quyền, lưu ngoài repo. Không chép certificate/private key giữa hai cloud.
 
-Nếu tạm nghỉ giữa GĐ5/GĐ6, có thể stop hai VM; khi bật lại, xác nhận Elastic IP/Static Public IP, container và certificate còn hoạt động. VM tắt thì cả ứng dụng lẫn renewal không chạy. [AWS EC2 lifecycle](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-instance-lifecycle.html) · [Azure VM billing](https://learn.microsoft.com/en-us/azure/virtual-machines/states-billing).
+Nếu tạm nghỉ giữa GĐ5/GĐ6, có thể stop hai VM; khi bật lại, xác nhận writer, phê duyệt startup guard theo hướng dẫn VM rồi kiểm tra Elastic IP/Static Public IP, pods và certificate. Nếu đã bật GĐ6B, disable rule và đợi mọi execution/SSM command terminal trước bảo trì; chỉ bật lại sau baseline/OK và rearm nếu có incident. VM tắt thì cả ứng dụng lẫn renewal không chạy. [AWS EC2 lifecycle](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-instance-lifecycle.html) · [Azure VM billing](https://learn.microsoft.com/en-us/azure/virtual-machines/states-billing).
+
+## Đọc nhanh trước khi triển khai
+
+| Nội dung | Tóm tắt |
+|---|---|
+| Mục tiêu | Thiết lập DNS, HTTPS và gia hạn certificate riêng trên hai VM. |
+| Chuẩn bị | Hai origin HTTP đạt; có domain, IP cố định và email certificate. |
+| Hoàn tất khi | TLS hợp lệ cho hai origin và hostname chung; renewal đã dry-run. |
+
+**Luồng thao tác:** [2. Chuẩn bị domain và địa chỉ origin](#2-chuẩn-bị-domain-và-địa-chỉ-origin) → [3. AWS Console — tạo public hosted zone và nối domain](#3-aws-console--tạo-public-hosted-zone-và-nối-domain) → [4. AWS Console — tạo hai A record origin](#4-aws-console--tạo-hai-a-record-origin) → [5. Mở cổng HTTPS ở hai cloud](#5-mở-cổng-https-ở-hai-cloud) → [6. AWS Console — quyền Route 53 cho Certbot](#6-aws-console--quyền-route-53-cho-certbot) → [7. Cấp certificate — làm AWS trước, Azure sau](#7-cấp-certificate--làm-aws-trước-azure-sau) → [8. CẢ HAI CLUSTER — đưa certificate vào TLS Secret và Ingress](#8-cả-hai-cluster--đưa-certificate-vào-tls-secret-và-ingress) → [9. LAPTOP — kiểm tra HTTPS trước khi đổi DNS chung](#9-laptop--kiểm-tra-https-trước-khi-đổi-dns-chung) → [10. Renewal tự động — lệnh chung và lịch riêng cho hai máy](#10-renewal-tự-động--lệnh-chung-và-lịch-riêng-cho-hai-máy) → [13. Checklist nghiệm thu](#13-checklist-nghiệm-thu).
+
+**Bắt buộc:** thực hiện các bước cấu hình và kiểm tra của luồng đã chọn; chỉ bỏ qua khi bước đó ghi rõ tùy chọn hoặc điều kiện không áp dụng.
+
+**Cách đọc:** các bước cấu hình và kiểm tra nằm ở phần chính; mục thu gọn cuối file dành cho tham khảo hoặc xử lý lỗi. Giữ số mục gốc để tra cứu các tham chiếu. Thay placeholder và chạy lệnh đúng laptop/VM được ghi tại bước đó.
+
+**Tùy chọn:** redirect HTTP → HTTPS ở mục 9.2; cấp certificate, TLS Secret, kiểm tra và renewal vẫn là luồng chính.
 
 ## 1. Ta sẽ làm gì?
 
 ```text
-aws-origin.YOUR_DOMAIN   → AWS_PUBLIC_IP   → NGINX HTTPS → app:8080
-azure-origin.YOUR_DOMAIN → AZURE_PUBLIC_IP  → NGINX HTTPS → app:8080
+aws-origin.YOUR_DOMAIN   → AWS_PUBLIC_IP   → Traefik HTTPS → Service issues-app → pod app:8080
+azure-origin.YOUR_DOMAIN → AZURE_PUBLIC_IP  → Traefik HTTPS → Service issues-app → pod app:8080
 
 app.YOUR_DOMAIN: certificate hợp lệ trên CẢ HAI VM
                 kiểm tra bằng curl --resolve trước khi tạo DNS failover
@@ -18,9 +34,9 @@ app.YOUR_DOMAIN: certificate hợp lệ trên CẢ HAI VM
 
 Route 53 chỉ trả lời DNS. Khi đổi đích từ AWS sang Azure, trình duyệt vẫn gửi TLS SNI và HTTP Host là `app.YOUR_DOMAIN`. Do đó certificate trên mỗi VM phải chứa hostname chung này.
 
-Quy trình chính dùng **Certbot + ACME DNS-01 + plugin Route 53**. Certbot chạy trên Ubuntu host, tự thêm/xóa TXT xác thực ở Route 53; NGINX chạy trong Docker đọc certificate từ host. AWS dùng IAM role; Azure dùng IAM user riêng có quyền DNS giới hạn cho lab. Hai VM cấp certificate riêng, không sao chép private key giữa cloud. Không cần ALB, Azure Container Apps hoặc certificate của các dịch vụ đó.
+Quy trình chính dùng **Certbot + ACME DNS-01 + plugin Route 53**. Certbot chạy trên Ubuntu host, tự thêm/xóa TXT xác thực ở Route 53; certificate được đưa vào TLS Secret để Traefik trong K3s phục vụ HTTPS. AWS dùng IAM role; Azure dùng IAM user riêng có quyền DNS giới hạn cho lab. Hai VM cấp certificate riêng, không sao chép private key giữa cloud. Không cần ALB/Azure Container Apps. Các bước DNS, quyền Route 53 và Certbot dưới đây được giữ chi tiết; chỉ phần đưa certificate vào runtime đổi sang K3s.
 
-**Thứ tự:** tạo hosted zone → đợi domain được duyệt → đổi bốn NS tại nhà đăng ký tên miền → kiểm tra NS công khai → tạo hai A record origin → mở 443 → quyền DNS → certificate AWS → NGINX AWS → lặp lại Azure → renewal → nghiệm thu. Chưa tạo record `app` hoặc health check trong GD5. Browser sẽ kiểm tra hai hostname origin; hostname chung được kiểm tra bằng `curl --resolve`.
+**Thứ tự:** tạo hosted zone → đợi domain được duyệt → đổi bốn NS tại nhà đăng ký tên miền → kiểm tra NS công khai → tạo hai A record origin → mở 443 → quyền DNS → certificate AWS → TLS Secret/Ingress AWS → lặp lại Azure → renewal → nghiệm thu. Chưa tạo record `app` hoặc health check trong GD5. Browser sẽ kiểm tra hai hostname origin; hostname chung được kiểm tra bằng `curl --resolve`.
 
 ### Nơi thao tác và cách đọc lệnh
 
@@ -89,7 +105,7 @@ Người kiểm tra renewal: <tên thành viên phụ trách>
 2. Tạo **một** public hosted zone cho `YOUR_DOMAIN` ở Route 53; ghi `HOSTED_ZONE_ID` và **bốn NS mới của zone này**.
 3. Tại nhà đăng ký domain của bạn, đổi nameserver sang đúng bốn NS vừa lấy. Chờ truy vấn NS công khai khớp rồi mới tiếp tục.
 4. Tạo hai A record origin tới hai IP thật; xác nhận HTTP qua từng hostname.
-5. Mở 443, cấp quyền DNS-01, cấp certificate riêng trên AWS rồi Azure, cấu hình NGINX và kiểm tra HTTPS/renewal.
+5. Mở 443, cấp quyền DNS-01, cấp certificate riêng trên AWS rồi Azure, cấu hình Ingress/TLS Secret và kiểm tra HTTPS/renewal.
 
 Không dùng IP, NS, hosted zone ID hoặc certificate của người triển khai khác.
 
@@ -177,7 +193,7 @@ Mỗi tên phải trả đúng IP và environment. Nếu HTTP qua IP được nh
 | Destination port ranges | `443`                                                                        |
 | Protocol                | **TCP**                                                                  |
 | Action                  | **Allow**                                                                |
-| Priority                | `310` nếu chưa dùng; chọn số trống đứng trước rule Deny liên quan |
+| Priority                | `320` nếu chưa dùng (HTTP 310, WireGuard 330); chọn số trống đứng trước rule Deny liên quan |
 | Name                    | `Allow-HTTPS-443`                                                            |
 
 3. Bấm **Add**. Nếu subnet cũng gắn NSG, kiểm tra cả NSG subnet: traffic phải được phép qua cả hai. Giữ 80 và SSH giới hạn IP; không mở 8080.
@@ -193,7 +209,7 @@ sudo ufw status
 sudo ufw allow 443/tcp
 ```
 
-Không bật UFW mới trong bước này khi chưa chuẩn bị rule SSH. Mở firewall chưa đủ để 443 hoạt động: phải cấu hình NGINX và publish Docker port ở mục 8. Tham khảo [Microsoft: quản lý rule NSG](https://learn.microsoft.com/en-us/azure/virtual-network/manage-network-security-group).
+Không bật UFW mới trong bước này khi chưa chuẩn bị rule SSH. Mở firewall chưa đủ để 443 hoạt động: phải cấu hình Traefik/Ingress/TLS Secret ở mục 8. Tham khảo [Microsoft: quản lý rule NSG](https://learn.microsoft.com/en-us/azure/virtual-network/manage-network-security-group).
 
 ## 6. AWS Console — quyền Route 53 cho Certbot
 
@@ -279,7 +295,7 @@ Lưu `Ctrl+O`, Enter, thoát `Ctrl+X`, rồi:
 sudo chmod 600 /root/.aws/credentials
 ```
 
-Không chạy `cat` file để lấy evidence. Giữ file trên host cho renewal; không mount credential vào container app/NGINX. Sau lab, khi không còn cần renewal, deactivate rồi xóa key. Muốn bỏ long-term key ở môi trường lâu dài, thiết kế credential tạm như IAM Roles Anywhere riêng; không nằm trong bước lab này.
+Không chạy `cat` file để lấy evidence. Giữ file trên host cho renewal; không mount credential vào pod app/Traefik. Sau lab, khi không còn cần renewal, deactivate rồi xóa key. Muốn bỏ long-term key ở môi trường lâu dài, thiết kế credential tạm như IAM Roles Anywhere riêng; không nằm trong bước lab này.
 
 ## 7. Cấp certificate — làm AWS trước, Azure sau
 
@@ -292,9 +308,10 @@ sudo apt-get update
 sudo apt-get install -y certbot python3-certbot-dns-route53
 sudo certbot --version
 sudo certbot plugins
+sudo systemctl stop certbot.timer
 ```
 
-Danh sách plugin phải có `dns-route53`. Hướng dẫn dùng package Ubuntu; không trộn thêm bản snap/pip nếu đã cài Certbot theo cách khác. Nếu plugin thiếu, kiểm tra package/source trước khi cấp certificate.
+Danh sách plugin phải có `dns-route53`. Dừng timer trên **cả hai VM** trước cấp/dry-run thủ công để lịch nền không sửa TXT song song; nếu certbot.service đang chạy, đợi nó hoàn tất trước tiếp tục. Bật timer lại sau khi đặt lịch ở mục 10.5. Khi lỗi giữa chừng, giữ lịch tạm dừng trong lúc sửa, rồi nghiệm thu và bật lại để không bỏ quên renewal. Hướng dẫn dùng package Ubuntu; không trộn thêm bản snap/pip nếu đã cài Certbot theo cách khác. Nếu plugin thiếu, kiểm tra package/source trước khi cấp certificate.
 
 ### 7.2. CHỈ EC2 — cấp certificate dcs29-aws
 
@@ -321,7 +338,7 @@ Kỳ vọng certificate có hai SAN đúng và đường dẫn:
 Đợi cấp certificate EC2 xong. Trong **SSH Azure**, đảm bảo file credential mục 6.3 đã tạo; thay `YOUR_DOMAIN` và `CERT_EMAIL` bằng giá trị thật rồi chạy:
 
 ```bash
-sudo certbot certonly --dns-route53 \
+sudo env AWS_PROFILE=default AWS_SHARED_CREDENTIALS_FILE=/root/.aws/credentials certbot certonly --dns-route53 \
   --cert-name dcs29-azure \
   -d app.YOUR_DOMAIN \
   -d azure-origin.YOUR_DOMAIN \
@@ -333,334 +350,196 @@ sudo certbot certificates
 
 Certbot tự xử lý TXT DNS-01. Cấp lần lượt trên hai VM, kể cả khi renewal thử nghiệm, để tránh cùng sửa TXT `_acme-challenge.app...`. Không cần record A của `app` để cấp certificate DNS-01. Nếu CAA đang hạn chế issuer, chủ domain phải cho phép Let's Encrypt. Plugin cần outbound tới AWS API và ACME. [Plugin Route 53](https://certbot-dns-route53.readthedocs.io/en/stable/) mô tả cơ chế credential và DNS challenge.
 
-**Dừng nếu cấp certificate thất bại:** chưa sửa NGINX tham chiếu tới file không tồn tại. Không cấp certificate lặp nhiều lần khi chưa sửa lỗi để tránh rate limit.
+**Dừng nếu cấp certificate thất bại:** chưa tạo TLS Secret tham chiếu tới file không tồn tại. Không cấp certificate lặp nhiều lần khi chưa sửa lỗi để tránh rate limit.
 
-## 8. NGINX / Docker Compose — cấu hình HTTPS
+## 8. CẢ HAI CLUSTER — đưa certificate vào TLS Secret và Ingress
 
-Thứ tự cụ thể: **8.1 backup cả hai máy → 8.2 sửa Compose cả hai máy → 8.3 cấu hình EC2 và chạy 8.5 trên EC2 → 8.4 cấu hình Azure và chạy 8.5 trên Azure**. Lệnh 8.1/8.2/8.5 giống nhau nên chỉ ghi một bản. Không thay toàn bộ Compose vì sẽ mất cấu hình app GĐ3/GĐ4.
+Điều kiện: GĐ4 đã có namespace issues, Service issues-app và schema/replication. Các bước 2–7 phía trên vẫn chạy tại Console/Portal/SSH đúng như hướng dẫn. Không tạo lại NGINX Compose.
 
-### 8.1. CẢ HAI MÁY — backup, cùng lệnh
+### 8.1. Kiểm tra namespace, Service và IngressClass
 
-Trong SSH EC2, chạy các lệnh từ trên xuống trong cùng phiên SSH để biến `BACKUP_DIR` còn giá trị. Xong ghi đường dẫn backup EC2, rồi lặp lại trên SSH Azure và ghi đường dẫn backup Azure riêng:
+Trên SSH từng VM:
+
+```bash
+sudo k3s kubectl get ingressclass
+sudo k3s kubectl -n issues get pods,svc
+sudo certbot certificates
+```
+
+Mẫu dưới dùng IngressClass traefik mặc định K3s. Certificate phải gồm app.YOUR_DOMAIN và hostname origin đúng của VM, chưa hết hạn. Nếu Service chưa có endpoints Ready, quay lại GĐ4, không che lỗi bằng sửa TLS.
+
+### 8.2. Import certificate — mỗi VM dùng đường dẫn riêng
+
+**CHỈ EC2:**
+
+```bash
+sudo k3s kubectl -n issues create secret tls issues-tls --cert=/etc/letsencrypt/live/dcs29-aws/fullchain.pem --key=/etc/letsencrypt/live/dcs29-aws/privkey.pem --dry-run=client -o yaml | sudo k3s kubectl apply -f -
+```
+
+**CHỈ AZURE:**
+
+```bash
+sudo k3s kubectl -n issues create secret tls issues-tls --cert=/etc/letsencrypt/live/dcs29-azure/fullchain.pem --key=/etc/letsencrypt/live/dcs29-azure/privkey.pem --dry-run=client -o yaml | sudo k3s kubectl apply -f -
+```
+
+Không tách pipeline để in/lưu YAML Secret ra repo; không copy private key giữa cloud. Kiểm tra metadata bằng kubectl get secret issues-tls, không export nội dung Secret.
+
+### 8.3. Tạo Ingress HTTPS — ví dụ AWS
+
+Trên SSH AWS, mở editor:
 
 ```bash
 cd /opt/dcs29
-BACKUP_DIR="/opt/dcs29/backup-gd5-$(date -u +%Y%m%dT%H%M%SZ)"
-sudo mkdir -p "$BACKUP_DIR"
-sudo cp compose.yaml nginx.conf "$BACKUP_DIR/"
-printf 'Backup: %s\n' "$BACKUP_DIR"
+nano ingress-https.yaml
 ```
 
-Ghi đường dẫn này để rollback. Backup Compose có thể chứa cấu hình nhạy cảm; không đưa nguyên file lên Git nếu có secret.
-
-### 8.2. CẢ HAI MÁY — sửa Compose, cùng nội dung
-
-Làm trên SSH EC2 rồi SSH Azure. Lệnh mở file dùng đường dẫn tuyệt đối nên không cần đứng ở thư mục cụ thể. Bước này chỉ sửa file, chưa recreate container:
-
-```bash
-sudo nano /opt/dcs29/compose.yaml
-```
-
-Trong **service `nginx` hiện có**, sửa `ports` và `volumes` thành:
+Thay toàn bộ YOUR_DOMAIN trước khi dán. Ctrl+O → Enter → Ctrl+X để lưu.
 
 ```yaml
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      - /etc/letsencrypt:/etc/letsencrypt:ro
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: issues-https
+  namespace: issues
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+spec:
+  ingressClassName: traefik
+  tls:
+    - secretName: issues-tls
+      hosts:
+        - aws-origin.YOUR_DOMAIN
+        - app.YOUR_DOMAIN
+  rules:
+    - host: aws-origin.YOUR_DOMAIN
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: issues-app
+                port:
+                  number: 80
+    - host: app.YOUR_DOMAIN
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: issues-app
+                port:
+                  number: 80
 ```
 
-Lưu **Ctrl+O → Enter → Ctrl+X** trên từng máy. Giữ image, restart policy, depends_on và service app như cũ. Mount cả `/etc/letsencrypt` vì file trong `live/` là symlink tới `archive/`; mount chỉ một file có thể làm renewal không cập nhật đúng. Không đưa certificate/private key vào Docker image hay repo.
+Trên Azure tạo cùng file nhưng đổi cả hai chỗ aws-origin thành azure-origin; giữ app.YOUR_DOMAIN, tên Service và TLS Secret. Không dùng bản AWS nguyên xi trên Azure.
 
-### 8.3. CHỈ EC2 — cấu hình NGINX AWS
-
-Trong **SSH EC2**, chạy `sudo nano /opt/dcs29/nginx.conf`, xóa nội dung cũ và dán cấu hình dưới vào nano. Thay `YOUR_DOMAIN` bằng domain thật trong mọi `server_name` và đường dẫn certificate trước khi lưu. Giai đoạn kiểm tra ban đầu giữ HTTP proxy; sẽ bật redirect ở mục 9.
-
-```nginx
-server {
-    listen 80;
-    server_name app.YOUR_DOMAIN aws-origin.YOUR_DOMAIN;
-    resolver 127.0.0.11 ipv6=off valid=5s;
-
-    location / {
-        set $app_upstream app:8080;
-        proxy_pass http://$app_upstream;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_connect_timeout 3s;
-        proxy_read_timeout 15s;
-    }
-}
-
-server {
-    listen 443 ssl;
-    server_name app.YOUR_DOMAIN aws-origin.YOUR_DOMAIN;
-    ssl_certificate /etc/letsencrypt/live/dcs29-aws/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/dcs29-aws/privkey.pem;
-    ssl_protocols TLSv1.2 TLSv1.3;
-    resolver 127.0.0.11 ipv6=off valid=5s;
-
-    location / {
-        set $app_upstream app:8080;
-        proxy_pass http://$app_upstream;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_connect_timeout 3s;
-        proxy_read_timeout 15s;
-    }
-}
-```
-
-Lưu **Ctrl+O → Enter → Ctrl+X** rồi thực hiện mục **8.5 trên EC2**. Sau khi EC2 pass, chuyển sang mục 8.4 cho Azure.
-
-### 8.4. CHỈ AZURE — cấu hình NGINX Azure đầy đủ để copy
-
-Chạy trên **SSH Azure VM**, không chạy trên EC2 hoặc PowerShell laptop. Certificate `dcs29-azure` ở mục 7.3 phải đã cấp thành công, và Compose đã thêm port/mount ở mục 8.2.
-
-Mở file:
+### 8.4. Dry-run và áp dụng trên từng VM
 
 ```bash
-sudo nano /opt/dcs29/nginx.conf
+sudo k3s kubectl apply --dry-run=server -f /opt/dcs29/ingress-https.yaml
+sudo k3s kubectl apply -f /opt/dcs29/ingress-https.yaml
+sudo k3s kubectl -n issues get ingress
+sudo k3s kubectl -n issues describe ingress issues-https
 ```
 
-Xóa nội dung cũ, rồi dán toàn bộ cấu hình sau. Thay `YOUR_DOMAIN` bằng domain thật trong mọi `server_name` và đường dẫn certificate trước khi lưu:
+Traefik/ServiceLB phải lắng nghe 443 trên VM và SG/NSG đã cho phép. Không thêm publish port Docker. Nguồn: [Kubernetes TLS Ingress](https://kubernetes.io/docs/concepts/services-networking/ingress/), [Traefik Ingress annotations](https://doc.traefik.io/traefik/reference/routing-configuration/kubernetes/ingress/).
 
-```nginx
-server {
-    listen 80;
-    server_name app.YOUR_DOMAIN azure-origin.YOUR_DOMAIN;
-    resolver 127.0.0.11 ipv6=off valid=5s;
+## 9. LAPTOP — kiểm tra HTTPS trước khi đổi DNS chung
 
-    location / {
-        set $app_upstream app:8080;
-        proxy_pass http://$app_upstream;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_connect_timeout 3s;
-        proxy_read_timeout 15s;
-    }
-}
-
-server {
-    listen 443 ssl;
-    server_name app.YOUR_DOMAIN azure-origin.YOUR_DOMAIN;
-    ssl_certificate /etc/letsencrypt/live/dcs29-azure/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/dcs29-azure/privkey.pem;
-    ssl_protocols TLSv1.2 TLSv1.3;
-    resolver 127.0.0.11 ipv6=off valid=5s;
-
-    location / {
-        set $app_upstream app:8080;
-        proxy_pass http://$app_upstream;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_connect_timeout 3s;
-        proxy_read_timeout 15s;
-    }
-}
-```
-
-Lưu bằng **Ctrl+O → Enter → Ctrl+X**. Đây mới là bước sửa file; tiếp tục mục 8.5 để kiểm tra cú pháp trước khi tạo lại NGINX. HTTP vẫn proxy trong lúc kiểm tra; chỉ bật redirect sau khi HTTPS pass ở mục 9.3.
-
-### 8.5. CẢ HAI MÁY — kiểm tra và áp dụng, cùng lệnh
-
-Chạy trên **SSH EC2 sau 8.3**, rồi chạy cùng các lệnh trên **SSH Azure sau 8.4**. Lệnh kiểm tra/ap dụng giống nhau; config của từng máy đã được chuẩn bị riêng:
-
-```bash
-cd /opt/dcs29
-sudo docker compose config -q
-sudo docker compose run --rm --no-deps nginx nginx -t
-```
-
-Lệnh `run` kiểm tra config với mount certificate mới mà không publish port. Nếu báo syntax/certificate error, sửa trước, chưa chạy tiếp. Khi đã pass:
-
-```bash
-sudo docker compose up -d --no-deps --force-recreate --pull never nginx
-sudo docker compose ps
-sudo docker compose exec -T nginx nginx -t
-sudo docker compose logs --tail 50 nginx
-```
-
-Cần recreate vì đã thêm port/mount; chỉ reload không thêm được port Docker. App container không bị recreate. Có gián đoạn ngắn khi thay NGINX. `ps` phải cho thấy port 80 và 443 được publish.
-
-## 9. Kiểm tra HTTPS rồi bật redirect
-
-### 9.1. Kiểm tra từng origin từ PowerShell laptop
-
-Dùng `curl.exe` để tránh alias `curl` của Windows PowerShell. Không dùng `-k` hay `--insecure`:
+PowerShell laptop, thay domain/IP thật:
 
 ```powershell
-curl.exe --fail-with-body https://aws-origin.YOUR_DOMAIN/health/ready
 curl.exe --fail-with-body https://aws-origin.YOUR_DOMAIN/version
-curl.exe --fail-with-body https://azure-origin.YOUR_DOMAIN/health/ready
 curl.exe --fail-with-body https://azure-origin.YOUR_DOMAIN/version
+curl.exe --fail-with-body https://aws-origin.YOUR_DOMAIN/api/database/status
+curl.exe --fail-with-body https://azure-origin.YOUR_DOMAIN/api/database/status
 ```
 
-Mở hai URL origin trên browser: có HTTPS hợp lệ, dashboard hiển thị đúng environment. `https://PUBLIC_IP` có thể báo mismatch vì certificate cấp cho tên miền, không phải IP; dùng hostname đúng.
+AWS primary, Azure standby; cùng commit/digest. /health/database Azure trả 503 bình thường khi standby; không dùng curl --fail ở endpoint đó để nghiệm thu TLS.
 
-### 9.2. LAPTOP — kiểm tra hostname chung ép tới từng VM
-
-Chạy toàn bộ cụm dưới trong **cùng tab PowerShell laptop**, không chạy trong SSH EC2/Azure. Ba dòng đầu đặt biến, rồi mỗi lệnh curl kiểm tra một origin:
+### 9.1. Kiểm tra hostname chung ép tới mỗi VM
 
 ```powershell
-$SharedHost = "app.YOUR_DOMAIN"
-$AwsIp = "AWS_PUBLIC_IP"
-$AzureIp = "AZURE_PUBLIC_IP"
-
-# EC2 (AWS_PUBLIC_IP)
-curl.exe --fail-with-body --resolve "${SharedHost}:443:${AwsIp}" "https://${SharedHost}/version"
-# Azure (AZURE_PUBLIC_IP)
-curl.exe --fail-with-body --resolve "${SharedHost}:443:${AzureIp}" "https://${SharedHost}/version"
-# EC2 (AWS_PUBLIC_IP)
-curl.exe --fail-with-body --resolve "${SharedHost}:443:${AwsIp}" "https://${SharedHost}/health/ready"
-# Azure (AZURE_PUBLIC_IP)
-curl.exe --fail-with-body --resolve "${SharedHost}:443:${AzureIp}" "https://${SharedHost}/health/ready"
-# EC2 (AWS_PUBLIC_IP)
-curl.exe --fail-with-body --resolve "${SharedHost}:443:${AwsIp}" "https://${SharedHost}/api/devices"
-# Azure (AZURE_PUBLIC_IP)
-curl.exe --fail-with-body --resolve "${SharedHost}:443:${AzureIp}" "https://${SharedHost}/api/devices"
+$SharedHost = 'app.YOUR_DOMAIN'
+$AwsIp = 'AWS_PUBLIC_IP'
+$AzureIp = 'AZURE_PUBLIC_IP'
+curl.exe --fail-with-body --resolve "${SharedHost}:443:${AwsIp}" "https://${SharedHost}/issues.html"
+curl.exe --fail-with-body --resolve "${SharedHost}:443:${AzureIp}" "https://${SharedHost}/issues.html"
+curl.exe --fail-with-body --resolve "${SharedHost}:443:${AwsIp}" "https://${SharedHost}/api/issues"
+curl.exe --fail-with-body --resolve "${SharedHost}:443:${AzureIp}" "https://${SharedHost}/api/issues"
 ```
 
-`--resolve` chỉ ép IP cho tiến trình curl; vẫn gửi đúng TLS SNI/Host và kiểm tra certificate. Không cần sửa hosts file. Chỉ thêm HTTP header `Host:` khi gọi HTTPS qua IP không thay được TLS SNI.
+Không dùng -k để bỏ kiểm tra TLS. --resolve chỉ thử từng origin, không chứng minh DNS failover. Người dùng mở /issues.html; / vẫn là dashboard cũ nếu chưa cấu hình redirect trang.
 
-Kỳ vọng: AWS trả `aws-primary`, Azure trả `azure-standby`; `commit_sha` và **dataset SHA-256 đầy đủ** giống nhau. Lấy output mới từ cả hai VM trong cùng lượt và đối chiếu với `COMMIT_SHA` của GĐ2.
+### 9.2. Redirect HTTP → HTTPS khi cần
 
-### 9.3. Bật redirect — cấu hình riêng, lệnh áp dụng chung
-
-**Điều kiện:** HTTPS ở 9.1/9.2 đã pass. Chỉ thay block `server` cổng 80; giữ nguyên toàn bộ block `listen 443 ssl;` đã hoạt động. Không sửa Compose ở bước này.
-
-#### A. MỖI MÁY MỘT BLOCK — sửa file trên EC2 rồi Azure
-
-Lệnh mở editor giống nhau; chạy trong SSH của từng máy:
+Sau khi HTTPS kiểm tra thành công, xác nhận cluster có CRD Middleware của Traefik:
 
 ```bash
-sudo nano /opt/dcs29/nginx.conf
+sudo k3s kubectl get crd middlewares.traefik.io
 ```
 
-Trong file, xóa toàn bộ block đầu tiên chứa `listen 80;`, từ `server {` tới dấu `}` đóng block đó, gồm cả `location / { ... }` bên trong. Không xóa block cổng 443 và không chỉ xóa riêng dòng `listen 80;`.
+Tạo `/opt/dcs29/redirect-https.yaml` trên từng VM. Mẫu dùng Traefik CRD `traefik.io/v1alpha1`; đối chiếu version đang chạy trước khi apply:
 
-**CHỈ EC2 — thay block 80 bằng:**
-
-```nginx
-server {
-    listen 80;
-    server_name app.YOUR_DOMAIN aws-origin.YOUR_DOMAIN;
-    return 301 https://$host$request_uri;
-}
+```yaml
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: redirect-https
+  namespace: issues
+spec:
+  redirectScheme:
+    scheme: https
+    permanent: true
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: issues-http
+  namespace: issues
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+    traefik.ingress.kubernetes.io/router.middlewares: issues-redirect-https@kubernetescrd
+spec:
+  ingressClassName: traefik
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: issues-app
+                port:
+                  number: 80
 ```
 
-**CHỈ AZURE — thay block 80 bằng:**
-
-```nginx
-server {
-    listen 80;
-    server_name app.YOUR_DOMAIN azure-origin.YOUR_DOMAIN;
-    return 301 https://$host$request_uri;
-}
-```
-
-Trên từng máy, lưu **Ctrl+O → Enter → Ctrl+X**. File còn đúng hai block: 80 redirect và 443 proxy. EC2 giữ certificate `dcs29-aws`; Azure giữ `dcs29-azure`. Không dán block AWS vào Azure.
-
-#### B. CẢ HAI MÁY — cùng lệnh kiểm tra và áp dụng
-
-Sau khi sửa EC2, chạy bước B trên SSH EC2. Sau đó sửa Azure và lặp lại bước B trên SSH Azure. Lệnh giống nhau nên chỉ ghi một bản.
-
-**1. Kiểm tra trước:**
+Apply sẽ cập nhật Ingress issues-http đã tạo ở GĐ4, không thêm một ingress HTTP cạnh tranh:
 
 ```bash
-cd /opt/dcs29
-sudo docker compose run --rm --no-deps nginx nginx -t
+sudo k3s kubectl apply --dry-run=server -f /opt/dcs29/redirect-https.yaml
+sudo k3s kubectl apply -f /opt/dcs29/redirect-https.yaml
 ```
 
-Phải có `syntax is ok` và `test is successful`. Nếu lỗi thì dừng, sửa file trên máy đang kiểm tra; chưa chạy lệnh áp dụng.
-
-**2. Khi kiểm tra pass, áp dụng:**
-
-```bash
-sudo docker compose up -d --no-deps --force-recreate --pull never nginx
-sudo docker compose ps
-```
-
-NGINX phải Running/Up và publish 80/443. Chỉ NGINX được recreate, app giữ nguyên; có gián đoạn ngắn. Recreate giúp mount nhận file config hiện tại nếu editor đã thay file trên host.
-
-**3. Nếu NGINX không lên**, chạy trong SSH của máy lỗi:
-
-```bash
-sudo docker compose logs --tail 50 nginx
-```
-
-Cả hai máy hoạt động rồi mới sang bước C.
-
-#### C. Trên PowerShell laptop — xác nhận redirect
-
-Mở tab PowerShell ở laptop, **không chạy trong SSH**. Chạy từng lệnh:
+PowerShell laptop:
 
 ```powershell
 curl.exe -I http://aws-origin.YOUR_DOMAIN/version
-```
-
-Kỳ vọng có:
-
-```text
-HTTP/1.1 301 Moved Permanently
-Location: https://aws-origin.YOUR_DOMAIN/version
-```
-
-Tiếp theo:
-
-```powershell
 curl.exe -I http://azure-origin.YOUR_DOMAIN/version
-```
-
-Kỳ vọng có:
-
-```text
-HTTP/1.1 301 Moved Permanently
-Location: https://azure-origin.YOUR_DOMAIN/version
-```
-
-Các header khác có thể khác mẫu; quan trọng là **301** và **Location đúng HTTPS, hostname, đường dẫn**. Lệnh `-I` chỉ đọc header, không tự đi theo redirect.
-
-Để kiểm tra cả redirect và ứng dụng sau redirect, chạy:
-
-```powershell
 curl.exe --fail-with-body -L http://aws-origin.YOUR_DOMAIN/version
-```
-
-```powershell
 curl.exe --fail-with-body -L http://azure-origin.YOUR_DOMAIN/version
 ```
 
-`-L` yêu cầu curl đi theo redirect. Kết quả phải là JSON `/version`: AWS trả `aws-primary`, Azure trả `azure-standby`, version/dataset vẫn khớp và không lỗi TLS. Có thể mở hai URL HTTP origin trên browser để thấy thanh địa chỉ chuyển sang HTTPS.
+Kỳ vọng redirect tới HTTPS cùng hostname/path; -L trả JSON đúng cloud, không lỗi TLS hoặc vòng lặp. Nếu CRD thiếu/dry-run lỗi, xử lý Traefik theo version trước, không dán cấu hình NGINX cũ vào cluster. Giữ cổng 80 cho redirect; DNS-01 không cần cổng này để xác thực certificate. Nguồn: [Traefik RedirectScheme](https://doc.traefik.io/traefik/reference/routing-configuration/http/middlewares/redirectscheme/).
 
-**Nếu chưa đúng:**
-
-| Kết quả                          | Việc cần kiểm tra                                                                  |
-| ---------------------------------- | ------------------------------------------------------------------------------------- |
-| HTTP vẫn trả 200 thay vì 301    | Block 80 chưa thay đúng hoặc chưa recreate NGINX; kiểm tra file trên đúng VM |
-| Redirect tới hostname cloud khác | Sai`server_name` hoặc `return`; dùng đúng block riêng của từng máy        |
-| 301 đúng nhưng`-L` lỗi       | Kiểm tra HTTPS/443, certificate và NGINX logs; gọi lại URL HTTPS trực tiếp      |
-| Redirect lặp                      | Chỉ đặt`return 301` trong block 80; block 443 phải giữ proxy tới app          |
-
-**Hoàn thành 9.3** khi cả hai origin trả 301 đúng và các lệnh `-L` nhận JSON đúng. Giữ cổng 80 mở để redirect; từ đây dùng HTTPS để kiểm tra health. Tiếp tục **mục 10: renewal certificate**. GĐ6 sẽ dùng health check HTTPS/443 trên hai hostname origin.
+Giữ scheme/hostname/port chung xuyên failover để localStorage giữ bản nháp. Chuyển GĐ6 chỉ khi TLS/Service/DB được kiểm tra trên cả hai origin.
 
 ## 10. Renewal tự động — lệnh chung và lịch riêng cho hai máy
 
-Certificate có hạn; ghi ngày hết hạn thực tế từ `certbot certificates`. Certbot cần quyền DNS còn hoạt động và hook reload NGINX sau khi gia hạn.
+Certificate có hạn; ghi ngày hết hạn thực tế từ `certbot certificates`. Certbot cần quyền DNS còn hoạt động và hook cập nhật TLS Secret sau khi gia hạn.
 
 **Quy ước:** mục ghi **CẢ HAI MÁY** thì dùng đúng cùng lệnh/nội dung trên SSH EC2 và SSH Azure; không cần đổi gì. Mục ghi **CHỈ EC2** hoặc **CHỈ AZURE** chỉ thực hiện trên máy đó. Tất cả lệnh mục 10 chạy trong SSH, không phải PowerShell laptop; có thể bắt đầu từ bất kỳ thư mục nào vì đường dẫn đã tuyệt đối hoặc hook tự `cd`.
 
@@ -668,41 +547,55 @@ Certificate có hạn; ghi ngày hết hạn thực tế từ `certbot certifica
 |---|---|---|
 | 10.1 Tạo và thử hook | Cả hai máy | Không; nội dung giống nhau |
 | 10.2 Dry-run renewal | Mỗi máy dùng lệnh riêng | Khác cert-name |
-| 10.3 Bật timer | Cả hai máy | Không |
+| 10.3 Kiểm tra unit | Cả hai máy | Không; timer còn dừng |
 | 10.4 Chỉnh lịch | EC2 và Azure có block riêng | Khác giờ chạy |
-| 10.5 Áp dụng và kiểm tra | Cả hai máy | Lệnh giống, lịch kết quả khác |
+| 10.5 Bật timer/kiểm tra | Cả hai máy | Lệnh giống, lịch kết quả khác |
 
-### 10.1. CẢ HAI MÁY — tạo hook reload NGINX
+### 10.1. CẢ HAI MÁY — hook cập nhật TLS Secret
 
-Làm trọn bước này trên EC2, rồi lặp lại cùng nội dung trên Azure.
-
-**1. Tạo thư mục và mở editor:** chạy lần lượt:
+Trên SSH từng VM:
 
 ```bash
 sudo install -d -m 755 /etc/letsencrypt/renewal-hooks/deploy
-sudo nano /etc/letsencrypt/renewal-hooks/deploy/20-dcs29-nginx
+sudo nano /etc/letsencrypt/renewal-hooks/deploy/20-dcs29-k3s
 ```
 
-**2. Trong nano**, dán nội dung sau, không dán trực tiếp vào shell:
+Dán vào editor, không dán trực tiếp vào shell:
 
 ```sh
 #!/bin/sh
 set -eu
-cd /opt/dcs29
-/usr/bin/docker compose exec -T nginx nginx -t
-/usr/bin/docker compose exec -T nginx nginx -s reload
+case "${RENEWED_LINEAGE:-}" in
+  /etc/letsencrypt/live/dcs29-aws|/etc/letsencrypt/live/dcs29-azure) ;;
+  *) exit 0 ;;
+esac
+/usr/local/bin/k3s kubectl -n issues create secret tls issues-tls \
+  --cert="$RENEWED_LINEAGE/fullchain.pem" \
+  --key="$RENEWED_LINEAGE/privkey.pem" \
+  --dry-run=client -o yaml | /usr/local/bin/k3s kubectl apply -f -
 ```
 
-Lưu bằng **Ctrl+O → Enter → Ctrl+X**.
-
-**3. Cấp quyền chạy và thử hook:**
+Ctrl+O → Enter → Ctrl+X. Sau đó:
 
 ```bash
-sudo chmod 750 /etc/letsencrypt/renewal-hooks/deploy/20-dcs29-nginx
-sudo /etc/letsencrypt/renewal-hooks/deploy/20-dcs29-nginx
+sudo chmod 750 /etc/letsencrypt/renewal-hooks/deploy/20-dcs29-k3s
 ```
 
-Phải có thông báo kiểm tra NGINX thành công và không có lỗi reload. Nếu lỗi, kiểm tra NGINX đang chạy và cấu hình trước khi tiếp tục. Hook giống nhau trên hai máy vì cả hai Compose nằm ở `/opt/dcs29`; hook không recreate app.
+Thử hook riêng với **certificate production hiện có**, không dùng certificate staging để thay TLS Secret.
+
+**EC2:**
+
+```bash
+sudo env RENEWED_LINEAGE=/etc/letsencrypt/live/dcs29-aws /etc/letsencrypt/renewal-hooks/deploy/20-dcs29-k3s
+```
+
+**Azure:**
+
+```bash
+sudo env RENEWED_LINEAGE=/etc/letsencrypt/live/dcs29-azure /etc/letsencrypt/renewal-hooks/deploy/20-dcs29-k3s
+```
+
+Kiểm tra HTTPS lại sau apply. Hook cập nhật Secret của cluster tại VM đó, không restart app. Nếu hook NGINX cũ còn trên máy chuyển đổi, kiểm tra và gỡ đúng hook cũ để renewal không gọi Compose đã bỏ. Khi K3s/API không hoạt động lúc renewal, phải retry import certificate sau khi phục hồi; không coi Certbot success là Secret chắc chắn đã cập nhật.
 
 ### 10.2. MỖI MÁY MỘT LỆNH — thử renewal
 
@@ -717,22 +610,21 @@ sudo certbot renew --cert-name dcs29-aws --dry-run
 **CHỈ AZURE:**
 
 ```bash
-sudo certbot renew --cert-name dcs29-azure --dry-run
+sudo env AWS_PROFILE=default AWS_SHARED_CREDENTIALS_FILE=/root/.aws/credentials certbot renew --cert-name dcs29-azure --dry-run
 ```
 
 Kỳ vọng thông báo simulated renewal thành công. Nếu lỗi, xử lý quyền Route 53/credential trước khi nghiệm thu. Dry-run dùng certificate thử nghiệm, không thay production certificate. Nó mặc định không chạy deploy hook, nên ta đã thử hook riêng ở 10.1. [Certbot: renewal và hooks](https://eff-certbot.readthedocs.io/en/stable/using.html#renewing-certificates).
 
-### 10.3. CẢ HAI MÁY — bật timer
+### 10.3. CẢ HAI MÁY — kiểm tra unit trước đặt lịch
 
 Chạy cả cụm dưới trên EC2, rồi chạy cùng cụm trên Azure:
 
 ```bash
-sudo systemctl enable --now certbot.timer
-systemctl list-timers --all certbot.timer
-sudo systemctl status certbot.timer --no-pager
+sudo systemctl cat certbot.timer
+sudo systemctl cat certbot.service
 ```
 
-`status` phải báo **active (waiting)**; `list-timers` có lịch chạy tiếp theo. Nếu pager vẫn mở, nhấn `q` để thoát. Nếu báo không tìm thấy unit, kiểm tra cách cài Certbot/package; không tạo scheduler thứ hai khi chưa rõ lịch hiện có.
+Timer còn dừng trong lúc đặt lịch. Nếu pager vẫn mở, nhấn `q` để thoát. Nếu báo không tìm thấy unit, kiểm tra cách cài Certbot/package; không tạo scheduler thứ hai khi chưa rõ lịch hiện có.
 
 ### 10.4. CHỈNH LỊCH RIÊNG — EC2 và Azure khác giờ
 
@@ -759,6 +651,7 @@ Dán nguyên block này vào vùng được lưu; không thêm `#` trước các
 OnCalendar=
 OnCalendar=*-*-* 00,12:00:00 UTC
 RandomizedDelaySec=0
+Persistent=false
 ```
 
 Nếu vùng phía trên đã có override `[Timer]`, sửa block đó thay vì thêm một lịch mới trùng. Không dán dưới dòng cảnh báo hoặc vào phần nội dung mặc định đang comment ở cuối file: phần đó sẽ bị bỏ khi lưu.
@@ -780,11 +673,32 @@ Cũng dán **phía trên** dòng `### Edits below this comment will be discarded
 OnCalendar=
 OnCalendar=*-*-* 06,18:00:00 UTC
 RandomizedDelaySec=0
+Persistent=false
 ```
 
 Lưu theo editor như phần A. Không copy block 00/12 UTC của EC2 vào Azure.
 
-**Ý nghĩa các dòng chung:** `OnCalendar=` để trống là có chủ ý, xóa lịch mặc định trước khi đặt lịch mới. `RandomizedDelaySec=0` bỏ độ trễ ngẫu nhiên để hai lịch giữ cách nhau. Các dòng cấu hình không bắt đầu bằng `#`.
+**Ý nghĩa các dòng chung:** `OnCalendar=` để trống là có chủ ý, xóa lịch mặc định trước khi đặt lịch mới. `RandomizedDelaySec=0` bỏ độ trễ ngẫu nhiên để hai lịch giữ cách nhau. `Persistent=false` tránh hai VM cùng chạy bù lịch missed ngay khi bật sau thời gian nghỉ. Các dòng cấu hình không bắt đầu bằng `#`. Lịch lệch giờ giảm xung đột, không phải distributed lock.
+
+Trên cả hai VM, tạo override giới hạn thời gian chạy service để một lượt bất thường không kéo sang lịch peer:
+
+```bash
+sudo install -d /etc/systemd/system/certbot.service.d
+sudo tee /etc/systemd/system/certbot.service.d/20-dcs29-timeout.conf >/dev/null <<'EOF'
+[Service]
+TimeoutStartSec=45min
+EOF
+```
+
+**Chỉ Azure:** tạo thêm override cho credential DNS của scheduler; không đưa access key vào unit:
+
+```bash
+sudo tee /etc/systemd/system/certbot.service.d/30-dcs29-dns-env.conf >/dev/null <<'EOF'
+[Service]
+Environment=AWS_PROFILE=default
+Environment=AWS_SHARED_CREDENTIALS_FILE=/root/.aws/credentials
+EOF
+```
 
 ### 10.5. CẢ HAI MÁY — áp dụng lịch và kiểm tra
 
@@ -792,6 +706,7 @@ Sau khi lưu override, chạy cùng cụm sau trên EC2 và Azure:
 
 ```bash
 sudo systemctl daemon-reload
+sudo systemctl enable --now certbot.timer
 sudo systemctl restart certbot.timer
 systemctl list-timers --all certbot.timer
 sudo systemctl status certbot.timer --no-pager
@@ -822,91 +737,41 @@ sudo journalctl -u certbot.service --since '7 days ago' --no-pager
 
 Kiểm tra ngày hết hạn và lỗi renewal, rồi gọi lại HTTPS từ laptop. Azure cần file credential root-only còn hợp lệ; nếu đổi key thì cập nhật và thử dry-run lại. EC2 cần IAM role vẫn gắn. Không coi reload thành công là bằng chứng đủ nếu endpoint HTTPS ngoài máy vẫn lỗi.
 
-## 11. Lỗi thường gặp
+## 12. Rollback cấu hình và lưu evidence
 
-| Triệu chứng                                | Cách kiểm tra/sửa                                                                                                          |
-| -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| DNS`NXDOMAIN` / IP sai                     | NS tại registrar/zone cha, zone public, A record, cache; không tạo thêm zone trùng                                       |
-| DNS`SERVFAIL`                              | Delegation/DNSSEC DS cũ; kiểm tra với chủ domain/registrar                                                                |
-| Certbot`AccessDenied`                      | Zone ID, policy TXT/hostname thật, role EC2 hoặc credential root Azure; permission boundary/SCP có thể chặn              |
-| `Unable to locate credentials`             | EC2 chưa gắn role/metadata không truy cập được; Azure file phải ở`/root/.aws/credentials` vì dùng sudo           |
-| ACME unauthorized / CAA                      | Kiểm tra authoritative DNS, quyền TXT, CAA cho issuer; không chạy hai Certbot cùng lúc                                  |
-| Không có plugin                            | Kiểm tra`python3-certbot-dns-route53` và `certbot plugins`; tránh trộn apt/snap                                       |
-| NGINX không đọc được certificate       | Cấp thành công trước, cert-name/path đúng, mount cả thư mục symlink; không chmod private key thành world-readable |
-| HTTPS timeout                                | SG/NSG/NACL/UFW, cả NSG NIC và subnet, port Docker, trạng thái VM                                                         |
-| Connection refused                           | NGINX chưa listen hoặc chưa publish 443; kiểm tra Compose ps và logs                                                     |
-| TLS hostname mismatch                        | SAN thiếu shared/origin, sai certificate path, DNS trỏ VM khác; không bỏ verify TLS                                      |
-| HTTPS 502                                    | App không ready; Docker resolver/upstream`app:8080`, Compose logs nginx/app                                                |
-| Renewal pass nhưng TLS vẫn certificate cũ | Hook reload thất bại, mount sai hoặc request vào origin khác; đối chiếu expiry qua TLS                                |
-| HTTP IP sau redirect báo lỗi certificate   | Dùng HTTP/HTTPS hostname, không IP; thay các probe cũ sang HTTPS origin                                                   |
+Trước khi sửa Ingress, copy file YAML nguồn sang bản backup có tên riêng trong /opt/dcs29; không export Secret có private key vào thư mục repo. Nếu Ingress lỗi, khôi phục file nguồn đúng VM và dry-run/apply lại, kiểm tra /version và /api/issues. Không rollback database/PVC để sửa TLS.
 
-## 12. Khi gặp lỗi: rollback trên máy lỗi; evidence là tùy chọn
+Giữ bằng chứng delegation/A records, certificate SAN/expiry (không private key), TLS origin/shared ép IP, Ingress metadata, Certbot dry-run/timer/hook và thời gian UTC. Các bước Console/DNS/Certbot ở mục 2–7 được thực hiện đầy đủ trên tài khoản của lần chạy này.
 
-### 12.1. CHỈ MÁY GẶP LỖI — khôi phục backup
+## 13. Checklist nghiệm thu
 
-Nếu hệ thống đang hoạt động thì **bỏ qua toàn bộ lệnh rollback**. Lệnh giống nhau cho hai VM nên ghi một bản: AWS lỗi thì chạy trong SSH EC2 với backup EC2; Azure lỗi thì chạy trong SSH Azure với backup Azure. Không rollback máy còn hoạt động và không dùng nhầm backup của cloud khác.
+- [ ] Domain delegation/A records đúng IP mới của hai VM.
+- [ ] Mục quyền Route 53 và DNS-01 hoàn tất trên đúng EC2/Azure.
+- [ ] Certificate origin/shared hợp lệ ở cả hai bên.
+- [ ] Ingress/Service hoạt động, API đọc schema được; HTTPS không bỏ verify.
+- [ ] Hook cập nhật TLS Secret, dry-run và lịch renewal đã kiểm tra.
+- [ ] Redirect chỉ đánh dấu khi đã triển khai/thử; dùng HTTPS chung để giữ origin bản nháp.
 
-Nếu lỗi trước khi recreate, sửa file hoặc phục hồi backup; container cũ vẫn có thể đang chạy config đã load. Nếu HTTPS mới không lên, dùng **đường dẫn backup thật đã ghi ở mục 8.1**:
+Tiếp [GĐ6 — chuyển database và DNS](GIAI_DOAN_06_ROUTE53_FAILOVER.md). TLS origin healthy không tự chứng minh database là writer.
 
-```bash
-cd /opt/dcs29
-# Thay TEN_BACKUP_THAT bằng tên thư mục đã ghi, không chạy nguyên placeholder.
-sudo cp /opt/dcs29/TEN_BACKUP_THAT/compose.yaml /opt/dcs29/compose.yaml
-sudo cp /opt/dcs29/TEN_BACKUP_THAT/nginx.conf /opt/dcs29/nginx.conf
-sudo docker compose config -q
-sudo docker compose run --rm --no-deps nginx nginx -t
-sudo docker compose up -d --no-deps --force-recreate --pull never nginx
-curl -fsS http://127.0.0.1/health/ready
-```
+---
 
-Rollback này quay về HTTP GĐ3/GĐ4 nếu backup lấy trước HTTPS. Không xóa certificate/zone/IP và không triển khai failover để né TLS lỗi. Nếu đã bật DNS failover ở giai đoạn sau, cần rollback theo GD6 thay vì quay về HTTP đơn lẻ.
+**Tham khảo / xử lý lỗi:** chỉ mở mục cần tra cứu. Nếu bước đang làm báo lỗi, dừng tại điểm kiểm tra và xem hướng dẫn tương ứng.
 
-### 12.2. TÙY CHỌN — evidence cho báo cáo
+## 11. Lỗi thường gặp — kiểm tra theo thứ tự
 
-Để phục vụ báo cáo và lần triển khai lại, thu output trên từng VM và ảnh Console/Portal, rồi lưu ghi chú trên **laptop trong `experiments/`** sau khi che thông tin nhạy cảm. Không cần tạo thư mục repo trên VM. Nội dung có thể gồm:
+<details>
+<summary>Khi gặp lỗi — mở hướng dẫn</summary>
 
-- Zone ID, delegation/NS, hai A record và TTL; screenshot không chứa secret.
-- AWS SG 443, Azure NSG 443 và Public IP tĩnh.
-- Cert-name, SAN, issuer, serial/fingerprint, ngày bắt đầu/hết hạn ở mỗi VM.
-- Output HTTPS health/version/devices và hostname chung ép IP ở cả hai origin.
-- Kết quả dry-run, hook, timer và owner renewal; NGINX TLS config đã thay hostname thật.
-- Chi phí domain, hosted zone/query và tài nguyên VM/IP; GD5 chưa tạo health check tính phí GD6.
+| Lỗi | Kiểm tra |
+|---|---|
+| DNS không resolve | Delegation NS, hosted zone, origin A record, resolver cache |
+| Certbot DNS-01 lỗi | IAM role/user, TXT policy, credential Azure, không chạy hai renewal cùng lúc |
+| TLS certificate mặc định/sai host | issues-tls, SAN, IngressClass/entrypoint và host rules |
+| HTTPS timeout | SG/NSG/UFW, Traefik/ServiceLB, VM Running |
+| HTTP 404 | Host/path Ingress, Service name/port |
+| HTTP 502/503 | Service endpoints, pod Ready, DATABASE_URL/schema |
+| Standby /health/database 503 | Trạng thái writer readiness bình thường, kiểm tra /api/database/status |
+| Renew success nhưng cert cũ | Hook chưa chạy/apply lỗi, Secret chưa cập nhật, thử hook đúng VM |
 
-**CHỈ EC2 — trong SSH EC2, lấy metadata certificate AWS:**
-
-```bash
-date -u +%FT%TZ
-sudo openssl x509 -in /etc/letsencrypt/live/dcs29-aws/fullchain.pem \
-  -noout -issuer -serial -dates -fingerprint -sha256 -ext subjectAltName
-```
-
-**CHỈ AZURE — trong SSH Azure, lấy metadata certificate Azure:**
-
-```bash
-date -u +%FT%TZ
-sudo openssl x509 -in /etc/letsencrypt/live/dcs29-azure/fullchain.pem \
-  -noout -issuer -serial -dates -fingerprint -sha256 -ext subjectAltName
-```
-
-Không lưu private key, AWS credential hay nguyên thư mục `/etc/letsencrypt` vào Git/evidence.
-
-## 13. Checklist nghiệm thu và bước tiếp theo
-
-| Kiểm tra                                               | AWS                | Azure              |
-| ------------------------------------------------------- | ------------------ | ------------------ |
-| Origin A record đúng, IP ổn định                   | Bắt buộc         | Bắt buộc         |
-| HTTPS origin, chain/hostname hợp lệ                   | Bắt buộc         | Bắt buộc         |
-| Shared hostname qua`--resolve`, không bỏ TLS verify | `aws-primary`    | `azure-standby`  |
-| `/health/ready`                                       | HTTP 200 qua HTTPS | HTTP 200 qua HTTPS |
-| Version/commit/dataset đầy đủ                       | Giống Azure       | Giống AWS         |
-| HTTP redirect                                           | 301 tới HTTPS     | 301 tới HTTPS     |
-| Renewal dry-run + hook + timer                          | Pass               | Pass               |
-
-- [ ] Domain thật và delegation Route 53 đã kiểm tra từ DNS bên ngoài.
-- [ ] Certificate mỗi VM chứa shared hostname và đúng hostname origin.
-- [ ] 443 mở, 8080 không public; Compose giữ nguyên app digest/environment/region.
-- [ ] Dashboard/API qua HTTPS origin và các lệnh ép shared hostname đều pass.
-- [ ] Nếu cần báo cáo: certificate metadata/evidence không secret đã lưu (tùy chọn; bạn hiện chọn bỏ qua).
-- [ ] Renewal owner, lịch chạy lệch nhau và kiểm tra expiry đã ghi.
-
-**Xong GD5:** cùng hostname có TLS hợp lệ tại cả hai cloud. Shared hostname chưa được publish DNS theo hướng dẫn này và chưa có chuyển traffic tự động. Sang [GD6 — Route 53 failover](GIAI_DOAN_06_ROUTE53_FAILOVER.md): tạo health checks HTTPS riêng từng origin và hai CNAME failover cùng tên `app`.
+</details>
