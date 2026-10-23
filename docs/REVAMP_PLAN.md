@@ -100,7 +100,7 @@ Hai chế độ dùng chung 4 bước fence → promote → verify → route:
 - Prometheus: job `blackbox_writer` probe `/health/database` của cả hai origin, kèm dashboard Grafana `DCS29 - Failover` được provisioning sẵn (chưa chạy trên stack Grafana thật; cấu hình Prometheus đã qua `promtool check config`).
 - GĐ6 và GĐ8 đã cập nhật theo flow mới; mục 9.2 của hướng dẫn Terraform và `AUTOMATION_FAILOVER.md` viết lại cho watcher.
 - Mục trade-off: `docs/TRADE_OFFS.md`.
-- **Không làm:** rút gọn `TRIEN_KHAI_BANG_TERRAFORM.md`. Đây là hướng dẫn thao tác từng bước, không chạy thử được ở local; cắt mạnh mà không kiểm chứng trên cloud có nguy cơ làm mất bước cần thiết. Nếu cần, rút gọn sau lượt nghiệm thu thật.
+- Rút gọn `TRIEN_KHAI_BANG_TERRAFORM.md`: chỉ gộp phần trùng nội dung. Mục 10.1 (giám sát) và 10.2 (kiểm thử) từng chép lại GĐ7/GĐ8 (khoảng 80% dòng giống hệt, phần khác chỉ là tiêu đề và tham chiếu chéo) nên nay trỏ sang hai hướng dẫn đó kèm các khác biệt riêng của Terraform; file giảm từ 1.697 xuống khoảng 1.170 dòng. Mục 9.1 giữ nguyên vì có lệnh rejoin riêng cho nhánh Terraform.
 
 ### GĐ F — Dọn repo và tài liệu (một phần)
 - Đã xong: `pytest.ini` (`testpaths = tests deploy/terraform`, `pythonpath = .`), xóa file/tài liệu thừa trong các giai đoạn trước, gộp nhánh tài liệu failover tự động về một nguồn.
