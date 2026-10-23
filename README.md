@@ -11,7 +11,7 @@
 - Bản nháp lưu trong trình duyệt, kiểm tra version khi sửa và mã yêu cầu chống ghi trùng khi retry.
 - CI kiểm thử với PostgreSQL, build image Linux AMD64, phát hành GHCR và kéo lại image để kiểm tra runtime.
 
-**Bản Issues với database hiện được kiểm chứng ở môi trường local.** Nhánh [Terraform tự động](docs/giai-doan/tu_dong/TRIEN_KHAI_BANG_TERRAFORM.md) đã có automation K3s, WireGuard, PostgreSQL AWS primary/Azure standby, app và HTTPS/renewal; cần chạy nghiệm thu trên hai VM thật. Đã bổ sung [GĐ6B failover tự động](docs/giai-doan/tu_dong/AUTOMATION_FAILOVER.md) bằng CloudWatch/EventBridge/Step Functions/Lambda và SSM Azure, mặc định tắt; chưa nghiệm thu trên cloud. Giám sát độc lập, rejoin và failback vẫn cần thực hiện theo runbook. Các hướng dẫn cloud cũ dành cho dashboard được giữ để tham khảo.
+**Bản Issues với database hiện được kiểm chứng ở môi trường local.** Nhánh [Terraform tự động](docs/giai-doan/tu_dong/TRIEN_KHAI_BANG_TERRAFORM.md) đã có automation K3s, WireGuard, PostgreSQL AWS primary/Azure standby, app và HTTPS/renewal; cần chạy nghiệm thu trên hai VM thật. Đã bổ sung [failover tự động](docs/giai-doan/tu_dong/AUTOMATION_FAILOVER.md) bằng watcher chạy trên VM Azure (cần cả probe của Azure lẫn Route 53 xác nhận AWS sập, fence rồi mới promote), mặc định tắt; chưa nghiệm thu trên cloud. Giám sát độc lập, rejoin và failback vẫn cần thực hiện theo runbook. Nhánh [thủ công](docs/giai-doan/thu_cong/README.md) mô tả cùng kiến trúc bằng Console/Portal.
 
 ## Chạy demo local
 
@@ -27,6 +27,8 @@ python -m venv .venv
 
 Mở **http://127.0.0.1:8090/issues.html** và giữ URL này trong toàn bộ demo.
 
+Muốn có sẵn nội dung để demo: `.venv/Scripts/python.exe scripts/seed_demo.py` (chạy lại không tạo trùng).
+
 | Thành phần | Địa chỉ local | Vai trò ban đầu |
 |---|---|---|
 | Proxy chung | `127.0.0.1:8090` | Chuyển yêu cầu tới AWS |
@@ -40,11 +42,13 @@ Mở **http://127.0.0.1:8090/issues.html** và giữ URL này trong toàn bộ d
 ### Thử failover và failback
 
 1. Tạo issue và bình luận qua cổng 8090; đối chiếu dữ liệu trên web Azure cổng 8081.
-2. Chuyển sang Azure:
+2. Chuyển có kế hoạch sang Azure (không mất dữ liệu):
 
    ```powershell
-   .venv/Scripts/python.exe scripts/local_replication.py failover
+   .venv/Scripts/python.exe scripts/local_replication.py switchover
    ```
+
+   Khi AWS đã sập thật, dùng `failover`: không khóa ghi hay chờ replay, fence AWS rồi promote Azure ngay; giao dịch chưa kịp replicate có thể mất.
 
 3. Giữ URL 8090, kiểm tra nhãn Azure rồi sửa issue hoặc gửi thêm bình luận.
 4. Dựng lại AWS thành standby của Azure và kiểm tra đồng bộ:
@@ -92,7 +96,7 @@ $env:TASKFLOW_DB_TESTS='1'
 .venv/Scripts/python.exe scripts/check_local_lifecycle.py
 ```
 
-Các test database dùng schema riêng. Script lifecycle dựng project Docker riêng, chạy hai vòng failover/failback qua proxy, kiểm tra dữ liệu issue/bình luận/lịch sử, retry và việc giữ volume cũ; chỉ dọn tài nguyên của project kiểm thử. Các cổng `55632/55633`, `18080/18081` và `18090` phải trống.
+Các test database dùng schema riêng. Script lifecycle dựng project Docker riêng, chạy nhiều vòng switchover/failover/failback qua proxy, kiểm tra dữ liệu issue/bình luận/lịch sử, retry và việc giữ volume cũ; chỉ dọn tài nguyên của project kiểm thử. Các cổng `55632/55633`, `18080/18081` và `18090` phải trống.
 
 ## API chính
 
@@ -107,26 +111,35 @@ Các test database dùng schema riêng. Script lifecycle dựng project Docker r
 | `/api/proxy/status` | Writer và phase của proxy, chỉ có trên cổng 8090 |
 | `/version` | Phiên bản và commit ứng dụng |
 
-Dashboard cũ tại `/` vẫn có `/api/devices`, `/metrics`, `/health/live` và `/health/ready`. `/health/ready` kiểm tra dataset dashboard; dùng `/health/database` khi kiểm tra khả năng phục vụ ghi của bản Issues. Metric workload cũ chỉ đo lưu lượng `/api/devices`.
+`/` chuyển hướng tới `/issues.html`. `/health/live` chỉ xác nhận process phản hồi (dùng cho Docker HEALTHCHECK, CI và probe Blackbox); dùng `/health/database` khi cần biết origin có phục vụ ghi được không. `/metrics` xuất số request/latency HTTP cho Prometheus.
 
 ## Cấu trúc và tài liệu
 
 ```text
 app/                 FastAPI, giao diện Issues và proxy local
 database/            Kết nối, truy vấn, schema, Compose và script replication
-scripts/             Điều phối và kiểm chứng failover/failback local
-tests/               Kiểm thử API, database và proxy
-docs/                Hướng dẫn local và kế hoạch triển khai
-deploy/              Cấu hình triển khai dashboard cloud trước đây
-observability/       Cấu hình Prometheus, Blackbox Exporter và Grafana
+scripts/             Failover/failback local, watcher, probe đo đạc, dữ liệu mẫu
+tests/               Kiểm thử API, database, proxy và watcher
+deploy/terraform/    Hạ tầng AWS/Azure, automation workload, HTTPS, DNS và watcher failover
+observability/       Prometheus, Blackbox Exporter và Grafana (dashboard có sẵn)
+images/              Sơ đồ kiến trúc và icon
+docs/                Hướng dẫn, đo đạc, trade-off, kế hoạch revamp
+  giai-doan/         Triển khai thủ công (thu_cong) và bằng Terraform (tu_dong)
+  course/            Yêu cầu và danh sách đề tài của môn học
+  archive/           Tài liệu thiết kế cũ, giữ để tham khảo
 .github/workflows/   Kiểm thử, build và phát hành image
 ```
 
 - [Failover, replication và failback local](docs/LOCAL_REPLICATION.md)
 - [Nghiệp vụ Issues và chế độ một database](docs/LOCAL_ISSUES.md)
 - [Cấu trúc database](database/README.md)
-- [Phương án Kubernetes và database đa cloud](docs/PHUONG_AN_NANG_CAP_KUBERNETES_DATABASE.md)
-- [Các giai đoạn triển khai dashboard cloud trước đây](docs/giai-doan/thu_cong/README.md)
+- Tự động failover local: `scripts/watcher.py` (xem [hướng dẫn replication](docs/LOCAL_REPLICATION.md#watcher-tự-failover))
+- [Đo đạc failover: downtime, RPO, latency, cost proxy](docs/DO_DAC_FAILOVER.md)
+- [Độ phức tạp vận hành và trade-off](docs/TRADE_OFFS.md)
+- [Kế hoạch revamp](docs/REVAMP_PLAN.md)
+- [Các giai đoạn triển khai thủ công](docs/giai-doan/thu_cong/README.md) · [bằng Terraform](docs/giai-doan/tu_dong/README.md)
 - [Thông số triển khai cloud](docs/giai-doan/thu_cong/THONG_SO_TRIEN_KHAI.md)
+- [Yêu cầu của môn học](docs/course/REQUIREMENTS.md) · [Danh sách đề tài](docs/course/Distributed_Computing_Systems_Project_List.pdf)
+- [Phương án Kubernetes và database đa cloud (tham khảo)](docs/archive/PHUONG_AN_NANG_CAP_KUBERNETES_DATABASE.md)
 
 Tên người gửi hiện được nhập trực tiếp, chưa có xác thực/phân quyền. Tài khoản và mật khẩu trong Compose chỉ dành cho demo local. Không commit credential, file `.env`, private key, Terraform state hoặc dữ liệu runtime.

@@ -1,43 +1,66 @@
-# Copy to terraform.tfvars. The real file is ignored by Git.
-# The image digest must be taken from ONE successful GHCR package version.
+# Copy to terraform.tfvars (the real file is ignored by Git) and replace every REPLACE-* value.
+# Settings are grouped by the apply round that needs them; later rounds stay off until earlier ones are verified.
+
+# ---- Round 1: infrastructure, K3s, WireGuard, PostgreSQL, app over HTTP ----
+
 aws_region            = "ap-southeast-1"
 azure_region          = "indiasouthcentral"
 azure_subscription_id = "REPLACE-WITH-YOUR-SUBSCRIPTION-UUID"
 domain_name           = "your-domain.example"
-ssh_public_key        = "ssh-ed25519 REPLACE-WITH-YOUR-PUBLIC-KEY your-laptop"
-ssh_cidr              = "203.0.113.10/32"
-ghcr_image            = "ghcr.io/vincody/multi-cloud-deployment-failover"
-image_digest          = "REPLACE-WITH-64-LOWERCASE-HEX-CHARACTERS"
 
-# Choose x86-64 sizes available in your region/subscription.
-aws_instance_type = "t3.medium"
-azure_vm_size     = "Standard_B2s"
+# Your public IPv4 with /32. Both VMs accept SSH only from here.
+ssh_cidr       = "203.0.113.10/32"
+ssh_public_key = "ssh-ed25519 REPLACE-WITH-YOUR-PUBLIC-KEY your-laptop"
 
-# Select one exact published K3s release after reviewing its release notes.
+# The digest must come from ONE successful GHCR package version (64 lowercase hex characters).
+ghcr_image   = "ghcr.io/vincody/multi-cloud-deployment-failover"
+image_digest = "REPLACE-WITH-64-LOWERCASE-HEX-CHARACTERS"
+
+# Pin one exact published K3s release after reviewing its release notes.
 k3s_version = "REPLACE-WITH-EXACT-K3S-RELEASE"
+
+# x86-64 sizes available in your region and subscription.
+aws_instance_type    = "t3.medium"
+azure_vm_size        = "Standard_B2s"
 aws_root_volume_size = 30
-# Increase if the Ubuntu image requires a larger OS disk.
-azure_os_disk_size = 30
+azure_os_disk_size   = 30 # increase if the Ubuntu image needs more
+aws_cpu_credits      = "standard"
 
-# Python 3.10+, OpenSSH ssh on the operator laptop; key contents stay outside Terraform.
+# Workload automation runs Python and OpenSSH on this laptop; key contents never enter Terraform.
 enable_workload_automation = true
-ssh_private_key_path = "C:/Users/YOUR_USER/.ssh/dcs29_terraform"
-postgres_image = "postgres@sha256:REPLACE-WITH-POSTGRES-17-BOOKWORM-DIGEST"
-automation_python = "python"
+ssh_private_key_path       = "C:/Users/YOUR_USER/.ssh/dcs29_terraform"
+postgres_image             = "postgres@sha256:REPLACE-WITH-POSTGRES-17-BOOKWORM-DIGEST"
+automation_python          = "python"
 standby_storage_generation = "initial"
-# Enable only after updating registrar nameservers and public DNS propagation.
-enable_https = false
-certificate_email = ""
-# Path to a private INI [default] file with the DNS-only Azure IAM user's key.
-# Empty reuses /root/.aws/credentials if already configured on Azure.
-azure_dns_credentials_file = ""
-aws_cpu_credits = "standard"
 
-# Set checks true after TLS and DB replication work. Standby is intentionally Unhealthy.
+# ---- Round 2: HTTPS (after the registrar uses the Route 53 nameservers and DNS has propagated) ----
+
+enable_https      = false
+certificate_email = ""
+# Private INI [default] file with the DNS-only Azure IAM user's key; empty reuses /root/.aws/credentials on the VM.
+azure_dns_credentials_file = ""
+
+# ---- Round 3: health checks (the standby is intentionally Unhealthy) ----
+
 enable_health_checks = false
-# Enable DNS only after testing fencing/promote/rejoin. DNS does not promote the DB.
+
+# ---- Round 4: DNS failover (only after fencing, promote and rejoin were rehearsed; DNS never promotes the database) ----
+
 enable_failover = false
 
-# GĐ6B only: complete manual fencing/promote/rejoin/failback and baseline checks first.
-# Adds CloudWatch/EventBridge/Step Functions/Lambda + Azure SSM hybrid registration.
-enable_auto_failover = false
+# Timing that dominates cloud failover time: detection = interval x threshold, then clients may cache the old
+# origin for up to the TTL. A 10 s interval is Route 53's fast interval and costs extra per check.
+# See: terraform output dns_failover_timing
+health_check_interval_seconds  = 30
+health_check_failure_threshold = 3
+dns_ttl_seconds                = 30
+
+# ---- Round 5 (optional): failover watcher on the Azure VM ----
+
+# Complete the manual drill and baseline checks first. Apply once with
+#   -target=aws_iam_user.azure_watcher -target=aws_iam_user_policy.azure_watcher
+# create an access key for that user outside Terraform, then point this at a private INI [default] file.
+enable_auto_failover           = false
+azure_watcher_credentials_file = ""
+watcher_threshold              = 3
+watcher_interval_seconds       = 5

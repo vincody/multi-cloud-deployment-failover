@@ -762,7 +762,7 @@ Test-NetConnection AZURE_PUBLIC_IP -Port 8080
 
 Mở http://AZURE_PUBLIC_IP/issues.html. Environment azure, region đúng, commit giống AWS; DB standby/replication_connected, writable=false. 8080 không public. Tạo/sửa/bình luận/đóng issue trên AWS rồi đối chiếu cả dữ liệu/lịch sử Azure.
 
-Nếu đã bật GĐ6B, Disable EventBridge rule và xác nhận mọi execution/SSM command terminal trước bảo trì/reboot. Reboot VM ở Portal, đợi Running, SSH lại, xác nhận writer và phê duyệt startup guard bằng block trong mục 7 trước kiểm tra K3s/node/pods/PVC và streaming. Chỉ Enable rule khi baseline và CloudWatch alarm OK; incident đã tồn tại phải hoàn tất rejoin/failback/rearm trước. Không xóa PVC để sửa pod. Nếu role đang đổi, theo GĐ6, không tự bật primary cũ.
+Nếu đã cài watcher, tạo `/opt/dcs29/watcher.pause` trên VM Azure (nếu đã cài watcher bằng nhánh Terraform) trước bảo trì/reboot. Reboot VM ở Portal, đợi Running, SSH lại, xác nhận writer và phê duyệt startup guard bằng block trong mục 7 trước kiểm tra K3s/node/pods/PVC và streaming. Chỉ xóa file pause khi baseline đã khỏe; incident đã tồn tại phải hoàn tất rejoin/failback trước. Không xóa PVC để sửa pod. Nếu role đang đổi, theo GĐ6, không tự bật primary cũ.
 
 ## 10. Buổi demo và chi phí
 

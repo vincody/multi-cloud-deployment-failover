@@ -692,7 +692,7 @@ sudo k3s kubectl -n issues exec deployment/issues-app -- python -c "from databas
 sudo k3s kubectl -n issues rollout status deployment/issues-app --timeout=120s
 ```
 
-Lệnh dùng DATABASE_URL trong Secret đã truyền vào pod. Bootstrap tasks chỉ khi cần demo cũ. App không tự init schema khi khởi động; không chạy lệnh này trên Azure standby.
+Lệnh dùng DATABASE_URL trong Secret đã truyền vào pod. App không tự init schema khi khởi động; không chạy lệnh này trên Azure standby.
 
 ### 9.5. Kiểm tra kết nối app trước Ingress
 
@@ -777,11 +777,11 @@ Invoke-RestMethod "http://AWS_PUBLIC_IP/api/issues"
 Test-NetConnection AWS_PUBLIC_IP -Port 8080
 ```
 
-Mở http://AWS_PUBLIC_IP/issues.html. Environment aws, region đúng, commit khớp image, DB primary/writable và API đọc được schema; 8080 không public. /health/ready dataset không chứng minh DB ghi được; dùng /health/database cho writer readiness.
+Mở http://AWS_PUBLIC_IP/issues.html. Environment aws, region đúng, commit khớp image, DB primary/writable và API đọc được schema; 8080 không public. /health/live không chứng minh DB ghi được; dùng /health/database cho writer readiness.
 
 ## 11. Restart, reboot và xử lý lỗi
 
-Nếu đã bật GĐ6B, Disable EventBridge rule và xác nhận mọi execution/SSM command terminal trước các lệnh bảo trì bên dưới.
+Nếu đã cài watcher failover tự động, tạo `/opt/dcs29/watcher.pause` trên VM Azure (nếu đã cài watcher bằng nhánh Terraform) trước các lệnh bảo trì bên dưới.
 
 Khi app đã triển khai:
 
@@ -790,7 +790,7 @@ sudo k3s kubectl -n issues rollout restart deployment/issues-app
 sudo k3s kubectl -n issues rollout status deployment/issues-app --timeout=120s
 ```
 
-Đây là restart app, không promote DB. Nếu đã bật GĐ6B, Disable EventBridge rule và xác nhận mọi execution/SSM command terminal trước bảo trì/reboot. Console → Instances → Instance state → Reboot instance; đợi status checks, SSH lại, xác nhận writer và chạy block phê duyệt startup guard ở mục 9 trước kiểm tra K3s/node/pods/PVC/API. Chỉ Enable rule khi baseline và CloudWatch alarm OK; nếu đã có incident thì hoàn tất rejoin/failback/rearm trước. Không xóa PVC để sửa lỗi pod.
+Đây là restart app, không promote DB. Nếu đã cài watcher, tạo `/opt/dcs29/watcher.pause` trên VM Azure (nếu đã cài watcher bằng nhánh Terraform) trước bảo trì/reboot. Console → Instances → Instance state → Reboot instance; đợi status checks, SSH lại, xác nhận writer và chạy block phê duyệt startup guard ở mục 9 trước kiểm tra K3s/node/pods/PVC/API. Chỉ xóa file pause khi baseline đã khỏe; nếu đã có incident thì hoàn tất rejoin/failback trước. Không xóa PVC để sửa lỗi pod.
 
 | Lỗi | Kiểm tra |
 |---|---|

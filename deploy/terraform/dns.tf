@@ -31,8 +31,8 @@ resource "aws_route53_health_check" "aws_origin" {
   type              = "HTTPS"
   resource_path     = "/health/database"
   enable_sni        = true
-  request_interval  = 30
-  failure_threshold = 3
+  request_interval  = var.health_check_interval_seconds
+  failure_threshold = var.health_check_failure_threshold
 
   tags = { Name = "dcs29-aws-https-ready" }
 }
@@ -46,8 +46,8 @@ resource "aws_route53_health_check" "azure_origin" {
   type              = "HTTPS"
   resource_path     = "/health/database"
   enable_sni        = true
-  request_interval  = 30
-  failure_threshold = 3
+  request_interval  = var.health_check_interval_seconds
+  failure_threshold = var.health_check_failure_threshold
 
   tags = { Name = "dcs29-azure-https-ready" }
 }
@@ -58,7 +58,7 @@ resource "aws_route53_record" "app_primary" {
   zone_id         = aws_route53_zone.main.zone_id
   name            = local.shared_host
   type            = "CNAME"
-  ttl             = 30
+  ttl             = var.dns_ttl_seconds
   records         = [local.aws_origin_host]
   set_identifier  = "aws-primary"
   health_check_id = try(aws_route53_health_check.aws_origin[0].id, null)
@@ -81,7 +81,7 @@ resource "aws_route53_record" "app_secondary" {
   zone_id         = aws_route53_zone.main.zone_id
   name            = local.shared_host
   type            = "CNAME"
-  ttl             = 30
+  ttl             = var.dns_ttl_seconds
   records         = [local.azure_origin_host]
   set_identifier  = "azure-secondary"
   health_check_id = try(aws_route53_health_check.azure_origin[0].id, null)
@@ -95,5 +95,13 @@ resource "aws_route53_record" "app_secondary" {
       condition     = var.enable_health_checks
       error_message = "Enable writer health checks and verify replication/fencing before publishing failover records. Only the current primary should be healthy."
     }
+  }
+}
+
+output "dns_failover_timing" {
+  description = "Worst-case time for Route 53 to mark an origin unhealthy, and the TTL clients may still cache. Real failover time adds the database promotion."
+  value = {
+    health_check_detection_seconds = var.health_check_interval_seconds * var.health_check_failure_threshold
+    app_cname_ttl_seconds          = var.dns_ttl_seconds
   }
 }

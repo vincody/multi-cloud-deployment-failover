@@ -1,5 +1,6 @@
 """PostgreSQL data access for issues; transactions preserve existing API behavior."""
 import json
+import os
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -87,3 +88,27 @@ def write(body, issue_id=None, comment=False):
             return json.loads(encoded(result))
     except psycopg.Error:
         raise HTTPException(503, "Chưa xác nhận được kết quả gửi. Bản nháp được giữ; hãy thử lại.")
+
+
+def write_ping(run_id: str, seq: int):
+    """Tiny write for failover probes; goes through the same write barrier as issues."""
+    try:
+        with connect() as db:
+            state = db.execute("SELECT pg_is_in_recovery() OR current_setting('transaction_read_only')::boolean AS read_only").fetchone()
+            if state["read_only"]:
+                raise HTTPException(409, "Database đang ở chế độ chỉ đọc.")
+            guard_write(db)
+            environment = os.getenv("APP_ENV", "local")
+            db.execute("INSERT INTO probe_pings(run_id,seq,environment) VALUES(%s,%s,%s) ON CONFLICT DO NOTHING", (run_id, seq, environment))
+            return {"run_id": run_id, "seq": seq, "environment": environment}
+    except psycopg.Error:
+        raise HTTPException(503, "Chưa xác nhận được kết quả ghi.")
+
+
+def list_pings(run_id: str):
+    try:
+        with connect() as db:
+            rows = db.execute("SELECT seq, environment FROM probe_pings WHERE run_id=%s ORDER BY seq", (run_id,)).fetchall()
+            return {"run_id": run_id, "count": len(rows), "pings": rows}
+    except psycopg.Error:
+        raise HTTPException(503, "Không đọc được dữ liệu probe.")

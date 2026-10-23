@@ -1,0 +1,124 @@
+{
+  "uid": "dcs29-failover",
+  "title": "DCS29 - Failover",
+  "schemaVersion": 39,
+  "version": 1,
+  "timezone": "utc",
+  "refresh": "10s",
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
+  "tags": [
+    "dcs29"
+  ],
+  "panels": [
+    {
+      "id": 1,
+      "title": "Writer: 1 = origin đang nhận ghi",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "dcs29-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "dcs29-prometheus"
+          },
+          "expr": "probe_success{job=\"blackbox_writer\"}",
+          "legendFormat": "{{target_name}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineInterpolation": "stepAfter"
+          },
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "title": "Origin còn phản hồi (health/live)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "dcs29-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 7
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "dcs29-prometheus"
+          },
+          "expr": "probe_success{job=\"blackbox_https\"}",
+          "legendFormat": "{{target_name}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineInterpolation": "stepAfter"
+          },
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "title": "Thời gian phản hồi probe (s)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "dcs29-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 7
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "dcs29-prometheus"
+          },
+          "expr": "probe_duration_seconds{job=\"blackbox_https\"}",
+          "legendFormat": "{{target_name}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineInterpolation": "linear"
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      }
+    }
+  ]
+}

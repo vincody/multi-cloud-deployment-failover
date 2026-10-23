@@ -4,10 +4,8 @@
 database/
   connection.py       Kết nối, đọc DATABASE_URL
   issues.py           Truy vấn issue/bình luận, transaction và retry
-  tasks.py            Truy vấn demo công việc cũ
   schema/
     issues.sql        Schema Issues mini
-    tasks.sql         Schema demo công việc cũ
   compose.local.yml   PostgreSQL local và volume bền vững
   compose.replication.yml Hai PostgreSQL primary/standby cho demo
   role.py             Vai trò và khả năng ghi thực tế của database
@@ -25,7 +23,7 @@ Project Compose giữ tên `hetinhtoanphanbo` để tiếp tục sử dụng con
 
 Thư mục này chứa mã nguồn và cấu hình, không chứa dữ liệu PostgreSQL thật. Dữ liệu vẫn nằm trong Docker volume. Không chạy `down -v` nếu muốn giữ dữ liệu. Schema là bootstrap local, chưa có cơ chế migration production.
 
-API/model đầu vào nằm ở `app/issues.py` và `app/tasks.py`; lớp dữ liệu giữ nguyên transaction, xử lý lỗi và kiểm tra version hiện có. Xem [hướng dẫn Issues mini](../docs/LOCAL_ISSUES.md).
+API/model đầu vào nằm ở `app/issues.py`; lớp dữ liệu giữ nguyên transaction, xử lý lỗi và kiểm tra version hiện có. Xem [hướng dẫn Issues mini](../docs/LOCAL_ISSUES.md).
 
 Đã có mô phỏng hai môi trường local: xem [hướng dẫn replication](../docs/LOCAL_REPLICATION.md). Bộ replication tái sử dụng volume primary cũ và có volume standby riêng. Sau promote Azure, không khởi động primary AWS cũ trước khi tái đồng bộ.
 

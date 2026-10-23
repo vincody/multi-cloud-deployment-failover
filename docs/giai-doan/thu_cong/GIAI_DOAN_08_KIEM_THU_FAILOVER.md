@@ -23,11 +23,11 @@
 - Hai origin và shared HTTPS pass.
 - Writer check AWS healthy, Azure standby check unhealthy đúng role; process/TLS probe hai origin healthy.
 - Monitoring nằm ngoài AWS.
-- Máy k6/probe không sleep, clock đồng bộ.
+- Máy chạy probe (laptop) không sleep, clock đồng bộ.
 - Budget và cleanup owner được xác nhận.
 - Run manifest ghi commit, digest, TTL, health interval/threshold, replica, client DNS mode và tải; ghi chế độ **manual GĐ6A** hoặc **automatic GĐ6B**. Không trộn hai chế độ trong cùng nhóm số đo.
 
-Không thay đổi image/TTL/replica giữa các lượt so sánh. Trong run manual/B0/F1 hoặc khi bảo trì, Disable EventBridge rule và xác nhận mọi execution/SSM command terminal. Trong run automatic F2/F4, kiểm tra SSM Online, baseline AWS primary/Azure standby streaming, latch/receipt đã rearm đúng quy trình, alarm OK rồi Enable rule; không promote tay song song. Khi kết thúc lỗi, Disable rule trước rejoin/failback, xác nhận command terminal, rồi rearm theo GĐ6B cho lượt tiếp theo.
+Không thay đổi image/TTL/replica giữa các lượt so sánh. Trong run manual/B0/F1 hoặc khi bảo trì, tạo `watcher.pause` trên VM Azure nếu watcher đang chạy. Trong run automatic F2/F4, kiểm tra `systemctl status dcs29-watcher` active, baseline AWS primary/Azure standby streaming, đã xóa `failover-incident.json` của lượt trước; không promote tay song song. Khi kết thúc lỗi, tạo lại `watcher.pause` trước rejoin/failback, rồi rearm cho lượt tiếp theo.
 
 ## 2. Workload Issues và kiểm chứng dữ liệu
 
@@ -52,7 +52,7 @@ Ghi IssueId, request_id, version, response và UTC. Retry cùng thao tác dùng 
 ### 2.2. Dữ liệu trong vòng chuyển đổi
 
 1. Trước lỗi: đợi Azure replay và so đầy đủ issue/bình luận/lịch sử.
-2. Gây lỗi VM, dùng runbook GĐ6A hoặc quan sát controller GĐ6B theo chế độ đã chọn; ghi request đã ACK và request kết quả chưa rõ.
+2. Gây lỗi VM, dùng runbook GĐ6A hoặc quan sát watcher GĐ6B (`journalctl -u dcs29-watcher -f`) theo chế độ đã chọn; ghi request đã ACK và request kết quả chưa rõ.
 3. Trên Azure mới: bình luận/sửa/đóng issue, retry kiểm tra không trùng.
 4. AWS rejoin: dữ liệu mới Azure phải có trên AWS trước failback.
 5. Sau failback: so lại ID/version/comments/history/receipts và thử giao dịch mới trên AWS.
@@ -60,7 +60,7 @@ Ghi IssueId, request_id, version, response và UTC. Retry cùng thao tác dùng 
 
 ### 2.3. Tải và script cũ
 
-Script tests/load/failover.js hiện gọi /api/devices, chỉ kiểm chứng workload dashboard/read-only. Có thể giữ phép đo HTTP 10 request/giây trong 10 phút để tham khảo, nhưng không lấy đó làm bằng chứng replication giao dịch Issues.
+Dùng `scripts/probe_failover.py`: mỗi tick có một lần ghi (`POST /api/ping`) có số thứ tự tăng dần, đi qua cùng khóa ghi với Issues. Sau lượt đo, script hỏi writer mới những `seq` nào đã ACK mà không còn, đó là số ghi bị mất (RPO đo được). Chạy `python scripts/seed_demo.py --url <URL chung>` trước để demo có sẵn dữ liệu. Phép đo này không thay vòng nghiệp vụ Issues ở 2.2.
 
 Mục 16 có workload tạo Issues tuần tự, UUID riêng và log before_send/ACK để demo; bài stress-test ghi đồng thời có version/receipt vẫn cần thiết kế riêng nếu đo capacity. Nếu không viết load script, vẫn làm đủ vòng nghiệp vụ/role/WAL phía trên và ghi phạm vi phép đo. Khi tăng tải theo dõi dropped_iterations, CPU credit và RAM 4 GiB.
 
@@ -68,13 +68,15 @@ Mục 16 có workload tạo Issues tuần tự, UUID riêng và log before_send/
 
 ### Client mặc định
 
-Giữ DNS/connection settings k6 mặc định, ghi rõ k6 version và resolver. Kết quả phản ánh client đó, không đại diện mọi browser.
+Giữ DNS/connection settings mặc định của client probe (httpx trong `probe_failover.py`, `trust_env=False` nên không đi qua proxy hệ thống), ghi rõ phiên bản Python/httpx và resolver. Kết quả phản ánh client đó, không đại diện mọi browser.
 
 ### DNS experiment
 
 Chạy thêm cấu hình TTL nội bộ ngắn và noConnectionReuse để quan sát authoritative change rõ hơn. Resolver OS/network vẫn có cache. Không so latency giữa hai cấu hình rồi quy toàn bộ chênh lệch cho cloud.
 
 ## 15. Probe CSV có thể tự chạy trên laptop
+
+> **Khuyến nghị:** dùng `scripts/probe_failover.py` thay cho script PowerShell dưới đây. Nó mỗi giây gọi `GET /version` và `POST /api/ping`, ghi `probe.csv`, và khi kết thúc tự tính downtime đọc/ghi, tỷ lệ lỗi, p50/p95 và số lần ghi đã ACK nhưng không còn trên writer mới (xem [đo đạc failover](../../DO_DAC_FAILOVER.md)). Script PowerShell chỉ đọc `/version` và giữ lại cho máy không có Python.
 
 PowerShell laptop, tạo file `probe.ps1` ngoài repo hoặc trong thư mục run đã gitignore. Dán script, thay domain; chạy trong terminal riêng suốt demo:
 
@@ -101,7 +103,7 @@ while ((Get-Date) -lt $EndTime) {
 }
 ```
 
-Request timeout có thể dài 5 giây nên không đảm bảo mỗi giây một sample khi lỗi. Probe này chỉ đọc /version; RTO ghi cần thêm giao dịch Issues theo mục 2. Mỗi thao tác ghi tạo UUID mới và giữ UUID/body khi kết quả chưa rõ. Không xem code k6 /api/devices là workload Issues.
+Request timeout có thể dài 5 giây nên không đảm bảo mỗi giây một sample khi lỗi. Probe này chỉ đọc /version; RTO ghi cần thêm giao dịch Issues theo mục 2. Mỗi thao tác ghi tạo UUID mới và giữ UUID/body khi kết quả chưa rõ.
 
 ### Workload Issues thủ công đủ kiểm chứng replication
 
@@ -167,12 +169,12 @@ F2 là bằng chứng chính; F5 không thay thế F2. Mỗi scenario tối thi�
 1. Tạo run ID, thư mục output và manifest.
 2. Xác nhận version/digest/role/WAL và dữ liệu Issues hai origin.
 3. Xác nhận writer checks đúng role, process probes và Grafana có dữ liệu.
-4. Bắt đầu Prometheus/Grafana, probe CSV và k6.
+4. Bắt đầu Prometheus/Grafana và `scripts/probe_failover.py` (ra `probe.csv` và `probe.summary.json`).
 5. Chạy baseline đủ 3 phút.
 6. Ghi UTC gửi lệnh stop EC2 (`t_action`).
 7. Ghi external origin down (`t0`).
 8. Ghi Route 53 unhealthy (`t_detect`).
-9. Xác nhận EC2 stopped trước promote. Run manual làm theo GĐ6A; run automatic theo dõi workflow/SSM, không promote bằng tay. Xác nhận Azure writer readiness; ghi response Azure đầu tiên qua shared domain (t_first_B) và giao dịch ghi đầu tiên.
+9. Xác nhận EC2 stopped trước promote. Run manual làm theo GĐ6A; run automatic theo dõi `journalctl -u dcs29-watcher`, không promote bằng tay. Xác nhận Azure writer readiness; ghi response Azure đầu tiên qua shared domain (t_first_B) và giao dịch ghi đầu tiên.
 10. Ghi 10 success liên tiếp (`t_stable`).
 11. Tiếp tục đo Azure ổn định.
 12. AWS trở lại trong trạng thái chặn primary cũ; rejoin, chờ dữ liệu/WAL rồi failback có kiểm soát theo GĐ6.
@@ -185,11 +187,11 @@ Lệnh stop/start chỉ dùng đúng instance lab đã xác minh bằng describe
 
 Mỗi run lưu:
 
-- `manifest.yaml`: scenario/config/digest/TTL, controller_mode, alarm period/evaluation và rule state.
-- Nếu automatic: execution ARN/state timeline, SSM command IDs/results, latch owner, UTC ALARM và xác nhận EC2 stopped trước promote.
+- `manifest.yaml`: scenario/config/digest/TTL, chế độ (manual/watcher), `threshold`/`interval` của watcher và trạng thái `watcher.pause`.
+- Nếu automatic: log `journalctl -u dcs29-watcher` (phát hiện, fence, promote), `failover-incident.json` và xác nhận EC2 stopped trước promote.
 - `incident.csv`: event và UTC.
 - `probe.csv`.
-- `k6.json` hoặc summary.
+- `probe.summary.json` (downtime, lỗi, p95, ghi bị mất).
 - Prometheus/Grafana export.
 - AWS/Azure/Route 53 snapshots.
 - `analysis.md` nêu kết quả và anomaly.
@@ -198,12 +200,12 @@ Raw data là bất biến; tạo file tổng hợp riêng. Không chỉnh raw CS
 
 ## 11. Cleanup sau thí nghiệm
 
-Export evidence trước. Nếu có GĐ6B, Disable rule, đợi execution/SSM command terminal rồi dọn controller/SSM/IAM theo GĐ6B mục 11; không để trigger chạy trong lúc xóa VM. Dừng/xóa đúng resources theo inventory: EC2, EBS nếu không cần, Elastic IP/public IPv4, Route 53 checks/records, Azure VM/managed disk/NIC/Public IP/Resource Group, log retention. Không xóa hosted zone/domain/tài nguyên dùng chung nếu chưa xác nhận.
+Export evidence trước. Nếu đã cài watcher, `sudo systemctl disable --now dcs29-watcher` trước khi xóa VM (mục 9.2 bước 6 của hướng dẫn Terraform); không để dịch vụ chạy trong lúc xóa VM. Dừng/xóa đúng resources theo inventory: EC2, EBS nếu không cần, Elastic IP/public IPv4, Route 53 checks/records, Azure VM/managed disk/NIC/Public IP/Resource Group, log retention. Không xóa hosted zone/domain/tài nguyên dùng chung nếu chưa xác nhận.
 
 ## 12. Checklist nghiệm thu
 
 - [ ] Có B0, B1, F2, F3; F2 chạy ít nhất 3 lượt.
-- [ ] Probe/k6/monitor chạy ngoài AWS.
+- [ ] Probe/monitor chạy ngoài AWS.
 - [ ] Timeline đủ `t_action/t0/t_detect/t_first_B/t_stable`.
 - [ ] Có error rate/downtime/latency, RTO ghi và RPO thực tế.
 - [ ] Có issue/comments/history/receipt trước-sau, không hai writer.
@@ -212,7 +214,7 @@ Export evidence trước. Nếu có GĐ6B, Disable rule, đợi execution/SSM co
 - [ ] Có DNS authoritative vs recursive evidence.
 - [ ] Có cost proxy.
 - [ ] Phân tích outlier/limitations.
-- [ ] Có runbook recovery/cleanup; run automatic có workflow/SSM evidence và rearm giữa các lượt.
+- [ ] Có runbook recovery/cleanup; run automatic có log watcher và rearm giữa các lượt.
 - [ ] Có video hoặc dữ liệu dự phòng cho demo.
 
 ## 14. Kiểm chứng storage và giới hạn
@@ -270,7 +272,7 @@ Kết luận cần trả lời:
 <details>
 <summary>Khi gặp lỗi — mở hướng dẫn</summary>
 
-- DNS/OS/browser/k6 cache.
+- DNS/OS/browser cache.
 - HTTP keep-alive.
 - Clock lệch.
 - Chỉ chạy một lượt.

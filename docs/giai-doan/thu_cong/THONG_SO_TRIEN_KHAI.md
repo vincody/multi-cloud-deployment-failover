@@ -45,10 +45,8 @@
 | KSM_VERSION | Tag kube-state-metrics tương thích K3s/Kubernetes |
 | AWS_HEALTH_CHECK_ID, AZURE_HEALTH_CHECK_ID | ID writer check từng origin ở GĐ6 |
 | ROUTE53_NS_1 … ROUTE53_NS_4 | Bốn NS của public hosted zone vừa tạo, điền tại nhà đăng ký |
-| DR_CONTROL_REGION, ACCOUNT_ID | us-east-1 và AWS account thật, dùng GĐ6B |
-| AZURE_NODE_ID, DR_CONTROLLER_MODE | SSM mi-ID thật; manual/automatic ghi theo lượt đo, không dùng ID máy người khác |
+| DR_CONTROLLER_MODE | manual/automatic ghi theo lượt đo |
 | NODE_EXPORTER_IMAGE_DIGEST | Image node-exporter linux/amd64 pin theo GĐ7 |
-| DATASET_SHA256 | Chỉ dùng so dashboard cũ; không thay kiểm chứng dữ liệu Issues |
 
 ## Thứ tự điền và kiểm tra trước khi chạy lệnh
 
@@ -57,7 +55,7 @@
 3. GĐ4 ghi tài nguyên manifest thực tế và DB/schema. Đường dẫn file trong hướng dẫn chỉ chạy sau khi đã tạo file tương ứng; mẫu manifest chi tiết đã nằm trong AWS Console/Azure Portal; thay digest/IP trước apply.
 4. GĐ5 dùng domain thuộc quyền quản lý: tạo hosted zone, ghi bốn NS, đổi nameserver tại nhà đăng ký, xác nhận delegation rồi tạo origin A records/certificate/Ingress.
 5. GĐ6 ghi writer role, WAL, VM fencing và health check IDs. DNS quay về AWS chỉ sau rejoin/chuyển role; không tự failback khi VM bật lại.
-6. GĐ6B (tùy chọn) ghi node SSM, IAM/ARN, alarm/rule/workflow và rearm; cấu hình GĐ7 trước demo automatic để có evidence.
+6. Failover tự động (tùy chọn, nhánh Terraform) ghi threshold/interval của watcher và thời điểm rearm; cấu hình GĐ7 trước demo automatic để có evidence.
 7. GĐ7 điền ba probe targets /health/live bằng hostname thật; thêm exporter/metrics riêng cho pod/DB. Không dùng standby /health/database 503 làm tín hiệu VM sập.
 
 Thay mọi YOUR_DOMAIN, IP, username, image, version và đường dẫn mẫu trước khi chạy. Các IP tài liệu 192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24 chỉ minh họa, không dùng triển khai. Kubeconfig, token, DSN password và certificate private key không đưa vào repo.
@@ -67,7 +65,7 @@ Thay mọi YOUR_DOMAIN, IP, username, image, version và đường dẫn mẫu t
 - T3 dùng CPU credit; ghi chế độ Standard/Unlimited và dự toán theo region. B2s cũng là burstable, cần theo dõi credit khi thử tải.
 - Bv1 có thông báo retirement. Nếu B2s không khả dụng, ghi lỗi và chốt lại size, không tự đổi cấu hình.
 - Managed disk Azure không thể thu nhỏ trực tiếp. Chọn theo image ngay lúc tạo; Azure lớn hơn 30 GiB không buộc AWS phải tăng theo.
-- Không dùng thông số nghiệm thu của lượt chạy cũ. Dataset fingerprint chỉ liên quan dashboard cũ; Issues kiểm chứng dữ liệu PostgreSQL, role và WAL.
+- Không dùng thông số nghiệm thu của lượt chạy cũ. Issues kiểm chứng dữ liệu PostgreSQL, role và WAL.
 
 Nguồn: [AWS CPU credit](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/burstable-performance-instances-unlimited-mode-concepts.html), [Azure Bv1](https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/bv1-series), [Azure disk FAQ](https://learn.microsoft.com/en-us/azure/virtual-machines/faq-for-disks).
 

@@ -13,7 +13,7 @@ Terraform tạo hai VM/K3s, WireGuard, PostgreSQL primary/standby, schema và ap
 | Lượt 4: DNS failover | Trong mục 9, chỉ publish DNS sau khi sẵn sàng runbook fencing/promote/rejoin |
 | Monitoring | [Cài Prometheus/Grafana và pod metrics](#101-cài-monitoring-và-theo-dõi-pods); Terraform chưa làm phần này |
 | Nghiệm thu | [Diễn tập thủ công](#91-gđ6a--failover-rejoin-và-failback-thủ-công), [kiểm thử và đo RTO/RPO](#102-kiểm-thử-và-đo-rtorpo) |
-| Lượt 5: tùy chọn | [Bật failover tự động GĐ6B](#92-gđ6b--failover-tự-động-aws--azure), sau diễn tập GĐ6A, về baseline và có monitoring |
+| Lượt 5: tùy chọn | [Bật failover tự động GĐ6B](#92-gđ6b--failover-tự-động-aws--azure-watcher), sau diễn tập GĐ6A, về baseline và có monitoring |
 | Chuẩn bị và thực hiện demo | [Runbook sau triển khai đến demo](#13-runbook-sau-triển-khai-đến-demo): kiểm tra baseline, tạo dữ liệu, gây lỗi, xác nhận Azure, rejoin/failback và lưu bằng chứng |
 | Vận hành | [Update image, bảo vệ state, dọn lab](#12-cập-nhật-image-bảo-vệ-state-và-dọn-lab); migration/retry/reboot ở cuối file |
 
@@ -21,7 +21,7 @@ Terraform tạo hai VM/K3s, WireGuard, PostgreSQL primary/standby, schema và ap
 
 **Cách đọc:** phần chính là luồng triển khai VM mới. Các mục tham khảo, hướng dẫn vận hành hoặc bước tùy chọn được trình bày trực tiếp bên dưới; đọc khi cần. Toàn bộ lệnh/manifest vẫn nằm trong file này. Giữ số mục gốc để các tham chiếu cũ tiếp tục dùng được.
 
-**Điểm dừng:** apply lỗi thì giữ state/VM/PVC và dùng [mục 7.2](#72-nếu-automation-thất-bại-hoặc-cần-chạy-lại); TLS lỗi dùng [mục 8.5](#85-retry-credential-rotation-và-phạm-vi). Không promote khi tạo health check, không chạy promote tay song song với workflow tự động. Khi bảo trì/rejoin, làm theo điều kiện dừng controller của mục 9.2.
+**Điểm dừng:** apply lỗi thì giữ state/VM/PVC và dùng [mục 7.2](#72-nếu-automation-thất-bại-hoặc-cần-chạy-lại); TLS lỗi dùng [mục 8.5](#85-retry-credential-rotation-và-phạm-vi). Không promote khi tạo health check, không chạy promote tay song song với watcher tự động. Khi bảo trì/rejoin, tạo `watcher.pause` theo mục 9.2.
 
 ## 1. Hiểu phạm vi tự động hóa
 
@@ -37,7 +37,7 @@ Terraform tạo hai VM/K3s, WireGuard, PostgreSQL primary/standby, schema và ap
 | Mạng database | WireGuard `10.200.29.1`/`.2`, UDP 51820 chỉ từ IP peer; PostgreSQL không mở Internet | Automation kiểm chứng bằng clone/streaming; không cấu hình lại tunnel |
 | DNS và quyền TLS | Hosted zone, A record, IAM; Certbot/TLS/Ingress/renewal khi bật `enable_https` | Delegate domain, chuẩn bị key DNS Azure và bật HTTPS |
 | DNS failover | Tạo health check và CNAME khi bật biến tương ứng | Kiểm chứng writer readiness và quy trình chuyển database trước |
-| Failover tự động GĐ6B | CloudWatch → EventBridge → Step Functions/Lambda, SSM Azure và incident latch khi `enable_auto_failover=true` | Diễn tập GĐ6A trước; rejoin/failback/rearm vẫn thủ công |
+| Failover tự động GĐ6B | Watcher trên VM Azure và IAM user quyền hẹp khi `enable_auto_failover=true` | Tạo access key ngoài Terraform; diễn tập GĐ6A trước; rejoin/failback vẫn thủ công |
 | Giám sát | Chưa triển khai | Prometheus/Grafana ngoài hai VM; thu thập pod/database metrics |
 
 Hai VM chạy **hai cụm K3s độc lập**. PostgreSQL standby đồng bộ bằng WAL, không phải bằng việc dùng chung PVC.
@@ -315,6 +315,8 @@ enable_health_checks = true
 enable_failover      = false
 ```
 
+Thời gian health check và DNS quyết định phần lớn failover time trên cloud, nên chỉnh được bằng biến (giá trị dưới là mặc định): `health_check_interval_seconds = 30` (chỉ nhận 10 hoặc 30; 10 là fast interval, tính thêm phí mỗi health check), `health_check_failure_threshold = 3`, `dns_ttl_seconds = 30` cho cặp CNAME `app`. Thời gian Route 53 cần để đánh dấu origin lỗi là `interval × threshold` (mặc định 90 giây); `terraform output dns_failover_timing` cho giá trị đang áp dụng. Giữ nguyên các giá trị này giữa các lượt đo (mục 13) và ghi vào manifest.
+
 Trên **PowerShell laptop**, ở `deploy/terraform`:
 
 ```powershell
@@ -343,11 +345,13 @@ Plan phải thêm đúng cặp CNAME failover. Không tạo lại health check/r
 
 **Chỉ khi diễn tập hoặc có sự cố — runbook thủ công**
 
-Các lệnh dưới thuộc **vận hành khi có sự cố hoặc diễn tập**, không phải bước cấu hình sau apply. Khi `enable_auto_failover=false`, fencing/promote thực hiện thủ công. GĐ6B ở mục 9.2 có thể tự fence AWS và promote Azure; rejoin/failback vẫn thủ công. Không chạy lệnh promote tay song song với workflow đang hoạt động.
+Các lệnh dưới thuộc **vận hành khi có sự cố hoặc diễn tập**, không phải bước cấu hình sau apply. Khi `enable_auto_failover=false`, fencing/promote thực hiện thủ công. GĐ6B ở mục 9.2 (watcher trên Azure) có thể tự fence AWS và promote Azure; rejoin/failback vẫn thủ công. Không chạy lệnh promote tay song song với watcher đang hoạt động.
 
 Chỉ thực hiện các lệnh chuyển role sau khi baseline và DNS phần 9 đã được cấu hình. Không promote trong lúc tạo health checks.
 
 #### 4. Chuyển role database — trước khi thử DNS failover
+
+> **Tương ứng với script local:** 4.1 + 4.2 + 4.3 là `switchover` (AWS còn sống, không mất dữ liệu); khi AWS đã sập thật bỏ 4.1 và làm 4.2 + 4.3, tương ứng `failover` (có thể mất giao dịch chưa kịp replicate). Watcher của nhánh Terraform tự thực hiện đúng chuỗi `failover` này.
 
 **Thứ tự thao tác:** đọc mục này trước để hiểu runbook, nhưng tạo record bằng Terraform ở phần 9 và xác nhận baseline AWS qua các lệnh quan sát bên dưới trước khi thực hiện chuyển role. Các lệnh mục 4 chỉ chạy trong lượt thử chuyển đổi đã chuẩn bị; không promote ngay khi đang tạo health checks.
 
@@ -607,184 +611,63 @@ Giữ cấu hình Health check/record, UTC từng bước, WAL cutoff/replay, fe
 - [ ] Có recovery runbook cho thao tác dở và inventory DB cũ.
 
 
-### 9.2. GĐ6B — Failover tự động AWS → Azure
+### 9.2. GĐ6B — Failover tự động AWS → Azure (watcher)
 
-**Tùy chọn, sau GĐ6A — các bước bật controller và vận hành**
+Cơ chế, quyết định, quyền AWS và vận hành chi tiết nằm ở [Failover tự động bằng watcher](AUTOMATION_FAILOVER.md). Phần này chỉ gồm các bước triển khai và diễn tập.
 
-Mặc định `enable_auto_failover=false`. Chỉ bật sau khi hoàn tất GĐ6A và trở về baseline. Terraform triển khai bộ điều phối; không promote trong apply.
+#### 1. Trước khi bật
 
-#### 1. Phạm vi và trình tự
+1. Đã diễn tập GĐ6A (mục 9.1): fence, promote, rejoin và failback thủ công thành công, AWS lại là primary và Azure lại là standby streaming.
+2. Bốn cờ đã bật và đã apply: `enable_workload_automation`, `enable_https`, `enable_health_checks`, `enable_failover`.
+3. Tạo IAM user bằng Terraform (bước 2 bên dưới), rồi **tạo access key trong Console** cho user `dcs29-azure-watcher` và lưu thành file INI riêng, ngoài repo:
 
-| Bước | Thành phần | Điều kiện/hành động |
-|---|---|---|
-| 1 | Route 53 | Kiểm tra `/health/database` AWS; interval 30 giây, threshold 3 hiện có |
-| 2 | CloudWatch | `HealthCheckStatus < 1` trong 2 datapoint 60 giây; missing data không kích hoạt |
-| 3 | EventBridge | Chỉ nhận ALARM của alarm `dcs29-auto-failover`, bắt đầu workflow |
-| 4 | Lambda/DynamoDB | Ghi latch độc quyền cho incident; sự kiện trùng không tiếp tục |
-| 5 | Lambda | Alarm vẫn ALARM và probe độc lập xác nhận AWS không sẵn sàng; kiểm tra lại sau 20 giây |
-| 6 | SSM Azure | K3s đang chạy, PostgreSQL 17 là standby, replay không pause và đã replay WAL nhận được |
-| 7 | Lambda/EC2 | Yêu cầu Stop EC2, poll tới đúng trạng thái `stopped`; không dùng force-stop |
-| 8 | Lambda/SSM | Kiểm tra EC2 vẫn stopped, chạy promote trên Azure qua Run Command |
-| 9 | PostgreSQL | Ghi incident receipt trước promote, promote và mở writer gate, kiểm tra lại role |
-| 10 | Lambda | Public HTTPS Azure báo primary/writable và EC2 vẫn stopped |
-| 11 | Route 53 | Writer health Azure thành Healthy, DNS failover chọn Azure; client còn cache cần thời gian |
+   ```ini
+   [default]
+   aws_access_key_id = ...
+   aws_secret_access_key = ...
+   ```
 
-Step Functions thực hiện các bước chờ và polling hữu hạn, timeout toàn workflow 25 phút. Lambda không giữ SSH key, không kết nối 5432 public và không tự khởi động K3s bị guard. Gửi SSM command không tự retry khi chưa biết command trước đã thực thi chưa; promotion cùng incident có receipt để tránh promote lặp.
+#### 2. Apply (hai bước)
 
-#### 2. Region và quyền
-
-CloudWatch metric của Route 53 được đọc ở **us-east-1**, nên alarm, EventBridge, Step Functions, Lambda, latch và SSM Azure nằm ở đó. EC2 vẫn dùng `aws_region` của project (ví dụ ap-southeast-1). Control plane ở ngoài VM AWS; với region chính khác us-east-1, nó cũng ở khác Region.
-
-Đây là automation cho sự cố VM/app trong điều kiện API EC2 vẫn truy cập được. **Nếu cả Region AWS mất khả dụng và không thể xác nhận EC2 đã dừng, workflow dừng trước promote.** Nó không đảm bảo DR tự động toàn Region khi không còn bằng chứng fencing.
-
-Azure được đăng ký thành SSM hybrid/multicloud node; không cần Azure client secret hoặc SSH runtime từ Lambda. Agent gọi endpoint SSM/ssmmessages us-east-1 qua outbound HTTPS 443. Không mở thêm inbound 22/5432/6443 cho Lambda. Registration dùng activation một máy, hết hạn sau một giờ và được xóa sau đăng ký; activation code chỉ đi qua bộ nhớ/SSH stdin, không nằm trong Terraform state.
-
-User chạy Terraform cần AWS CLI đăng nhập đúng **cùng account Terraform** và thêm quyền (bao gồm `sts:GetCallerIdentity` để đối chiếu account):
-
-- Tạo IAM role/policy, Lambda, Step Functions, CloudWatch/EventBridge và DynamoDB trong us-east-1.
-- `ssm:CreateActivation`, `DeleteActivation`, `DescribeInstanceInformation`, `AddTagsToResource`, `PutParameter`.
-- `iam:PassRole` cho role `dcs29-azure-ssm` khi tạo activation.
-
-Lambda chỉ được Stop đúng EC2, gửi command đến SSM node gắn tag Project=dcs29/Purpose=azure-dr, đọc node parameter và quản lý incident của project. Lambda **không có DeleteItem để tự xóa latch**, không có StartInstances, không cập nhật DNS trực tiếp và không tự failback.
-
-#### 3. Trước khi bật
-
-Hoàn tất bốn lượt Terraform hạ tầng/app, HTTPS, health check, DNS. Làm GĐ6A: fencing/promote/rejoin/failback thủ công, rồi trả hệ thống về baseline:
-
-- AWS primary/writable, Azure standby/streaming, cùng app commit.
-- Hai public origin HTTPS hoạt động, startup guard có trên cả hai VM.
-- AWS writer health Healthy, Azure standby writer health Unhealthy là đúng.
-- Không còn diễn tập/command chuyển role đang chạy, có backup ngoài VM và inventory PVC active.
-
-Terraform không biết buổi diễn tập đã pass; bạn phải xác nhận thực tế trước bật flag. Bootstrap kiểm tra lại role/gate/streaming và guard trước khi đăng ký agent, nhưng không thay thế nghiệm thu fencing/rejoin.
-
-VM Azure có SSM registration/snap từ một hệ thống khác sẽ bị từ chối tự nhận; cần migration/adoption riêng. Không xóa agent identity để ép đăng ký lại. Trên VM mới của project, automation cài agent từ AWS và lưu marker `/opt/dcs29/ssm-dr.json` root-only.
-
-#### 4. Lượt apply GĐ6B
-
-Trong `deploy/terraform/terraform.tfvars` giữ các flag cũ và thêm:
-
-```hcl
-enable_workload_automation = true
-enable_https               = true
-enable_health_checks       = true
-enable_failover            = true
-enable_auto_failover       = true
-```
-
-Trên **PowerShell laptop**, thư mục `deploy/terraform`:
+Bước cài watcher cần file key, nên tạo IAM user trước, lấy key rồi mới cài. Nếu apply đầy đủ khi chưa có file key, Terraform vẫn tạo user nhưng dừng lỗi ở bước cài watcher (`Watcher AWS credentials missing`); chạy lại sau khi có key là được.
 
 ```powershell
-terraform init
-terraform fmt -check
-terraform validate
-terraform test
-terraform plan -out=auto-failover.tfplan
-# Đọc plan: thêm control resources/SSM; không replace VM, disk hoặc PVC active.
-terraform apply auto-failover.tfplan
-terraform output auto_failover
+# terraform.tfvars: enable_auto_failover = true
+terraform plan  -target=aws_iam_user.azure_watcher -target=aws_iam_user_policy.azure_watcher
+terraform apply -target=aws_iam_user.azure_watcher -target=aws_iam_user_policy.azure_watcher
+# Console -> IAM -> dcs29-azure-watcher -> tạo access key, lưu vào file INI ngoài repo (xem bước 1)
+
+# terraform.tfvars: azure_watcher_credentials_file = "C:/path/outside/repo/watcher-credentials.ini"
+terraform plan
+terraform apply
 ```
 
-`terraform init` bổ sung provider archive để đóng gói Lambda. Bootstrap dùng Python/OpenSSH và AWS CLI trên laptop; không cần boto3 trên laptop để triển khai. Code Lambda dùng SDK có sẵn trong runtime.
+Terraform cảnh báo về `-target`; đây là lần dùng có chủ đích để tách việc tạo quyền khỏi việc cài dịch vụ. Plan của lượt thứ hai chỉ được thêm `terraform_data.watcher`; không replace VM, disk hay PVC. Bước cài đặt chạy trên laptop qua SSH: kiểm tra Azure là standby streaming, cài `python3-boto3`, copy ba tệp watcher, ghi cấu hình và credential, chạy `cloud_watcher.py --check`, rồi bật dịch vụ.
 
-Terraform tạo hybrid role, kiểm tra baseline, đăng ký/reuse agent Azure, chờ Online, gắn tag và ghi node ID vào Parameter Store Standard `/dcs29/dr/azure-node`. ID không phải credential. Resource `terraform_data.azure_ssm` không tự promote database trong apply. Sau đó tạo workflow/alarm/event target; từ thời điểm rule được bật, sự cố có thể tự dẫn tới Stop EC2/promote Azure.
-
-Trong **AWS Console**, chọn Region us-east-1:
-
-- Systems Manager → Managed nodes: `dcs29-azure-dr` Online.
-- Parameter Store: `/dcs29/dr/azure-node` trỏ đúng node Azure.
-- CloudWatch → Alarms: `dcs29-auto-failover` về OK sau đủ dữ liệu baseline.
-- EventBridge → Rules: `dcs29-auto-failover` Enabled, target là workflow.
-- Step Functions: state machine Standard `dcs29-auto-failover`, chưa có execution đang promote.
-
-#### 5. Diễn tập và kiểm chứng
-
-Bật monitoring/evidence trước. Khi đã cho phép gây sự cố, Stop đúng EC2 hoặc gây lỗi có kiểm soát; không promote Azure bằng tay song song với workflow. Theo dõi execution trên Step Functions:
-
-```powershell
-$WorkflowArn = terraform output -json auto_failover | ConvertFrom-Json | Select-Object -ExpandProperty workflow
-aws stepfunctions list-executions --state-machine-arn $WorkflowArn --region us-east-1
-```
-
-Sau completion, kiểm tra trên laptop, thay YOUR_DOMAIN thật:
-
-```powershell
-curl.exe --fail-with-body https://azure-origin.YOUR_DOMAIN/api/database/status
-curl.exe --fail-with-body https://azure-origin.YOUR_DOMAIN/health/database
-curl.exe --fail-with-body https://app.YOUR_DOMAIN/version
-curl.exe --fail-with-body https://app.YOUR_DOMAIN/api/issues
-```
-
-Azure primary/writable, EC2 stopped, shared URL về environment azure sau DNS cache; issue/comment/history đã replicate vẫn đọc được. Ghi giao dịch ACK và timeline/RTO/RPO theo GĐ8. AWS ALARM vẫn có thể tồn tại sau failover; latch chặn các incident trùng, không tự trả AWS về primary.
-
-Thời gian gồm health check, alarm 2×60 giây, xác minh, preflight, EC2 stop, SSM, health check Azure và cache DNS. Không coi interval 30 giây là RTO 30 giây. Async replication không đảm bảo dữ liệu cuối đã commit trên AWS đều đến Azure; chờ replay chỉ đảm bảo xử lý WAL **đã nhận**, không xác nhận WAL chưa truyền.
-
-#### 6. Lỗi, maintenance và failback
-
-Nếu AWS hồi phục, DNS/TLS probe không đáng tin, Azure offline/replay pause, không Stop được EC2 hoặc SSM trả kết quả lỗi: workflow dừng, giữ latch. Trường hợp command timeout, promotion có thể đã xảy ra trước khi trả kết quả; kiểm tra SSM invocation và role thực tế, không gửi promote mới mù quáng.
-
-Trước maintenance, rejoin hoặc failback, tắt **rule trigger**, không đặt `enable_auto_failover=false` chỉ để pause vì biến đó sẽ gỡ cả control resources:
-
-```powershell
-aws events disable-rule --name dcs29-auto-failover --region us-east-1
-aws stepfunctions list-executions --state-machine-arn $WorkflowArn --status-filter RUNNING --region us-east-1
-$AzureNode = aws ssm get-parameter --name /dcs29/dr/azure-node --query Parameter.Value --output text --region us-east-1
-aws ssm list-commands --instance-id $AzureNode --region us-east-1
-```
-
-Disable rule không hủy execution/SSM command đã bắt đầu. Không Start AWS primary cũ khi còn execution/command Pending/InProgress/Delayed/Cancelling hoặc chưa xác định role. Giữ AWS bị fence; rejoin/failback bằng mục 9.1 ở trên, không dùng initial workload automation để ghi đè PVC active sau rejoin.
-
-Sau toàn bộ command/execution cũ đã terminal và failback đã về AWS primary/Azure standby/streaming, mới rearm. Trong SSH Azure, chỉ xóa incident receipt khi database đã là standby; root file chứa owner ARN để đối chiếu:
+#### 3. Kiểm tra sau khi bật
 
 ```bash
-test "$(sudo k3s kubectl -n issues exec postgres-0 -- psql -U postgres -d issues -At -c 'SELECT pg_is_in_recovery()')" = t || exit 1
-sudo cat /opt/dcs29/failover-incident.json
-sudo rm -f /opt/dcs29/failover-incident.json
+sudo systemctl status dcs29-watcher
+sudo journalctl -u dcs29-watcher -n 20     # mỗi chu kỳ: web=True db=True verdict=healthy
 ```
 
-Không xóa marker khi Azure còn primary. Trên laptop, đọc latch bằng file JSON để tránh lỗi quoting trên Windows PowerShell:
+#### 4. Diễn tập
 
-```powershell
-$LatchKeyFile = Join-Path $env:TEMP 'dcs29-dr-latch-key.json'
-[IO.File]::WriteAllText($LatchKeyFile, '{"id":{"S":"writer"}}', [Text.UTF8Encoding]::new($false))
-$Incident = aws dynamodb get-item --table-name dcs29-dr-latch --key "file://$LatchKeyFile" --consistent-read --region us-east-1 | ConvertFrom-Json
-if ($LASTEXITCODE -ne 0 -or -not $Incident.Item.owner.S) { throw 'Không đọc được incident owner' }
-$Incident.Item
-```
+1. Bật monitoring (mục 10) và chạy `scripts/probe_failover.py` từ laptop tới `https://app.<domain>`.
+2. Ghi mốc UTC, rồi Stop đúng EC2 trong Console. Không promote Azure bằng tay song song với watcher.
+3. Theo dõi `journalctl -u dcs29-watcher -f`: phát hiện, fence (`stopped`), promote, Azure writable.
+4. Kiểm tra `/api/database/status` và `/health/database` của Azure, AWS vẫn Stopped, shared domain trả về Azure sau khi DNS cập nhật.
+5. Ghi detection time, failover time, downtime và số ghi bị mất theo [đo đạc failover](../../DO_DAC_FAILOVER.md). Thời gian trên cloud còn gồm chu kỳ health check Route 53 và TTL; không coi interval 30 giây là RTO 30 giây.
 
-Chỉ khi roles/SSM commands đã được xác minh, xóa đúng latch với điều kiện owner không đổi:
+#### 5. Lỗi, bảo trì và failback
 
-```powershell
-$OwnerFile = Join-Path $env:TEMP 'dcs29-dr-latch-owner.json'
-$OwnerJson = @{ ':owner' = @{ S = $Incident.Item.owner.S } } | ConvertTo-Json -Depth 4 -Compress
-[IO.File]::WriteAllText($OwnerFile, $OwnerJson, [Text.UTF8Encoding]::new($false))
-aws dynamodb delete-item --table-name dcs29-dr-latch --key "file://$LatchKeyFile" --condition-expression 'owner = :owner' --expression-attribute-values "file://$OwnerFile" --region us-east-1
-if ($LASTEXITCODE -ne 0) { throw 'Latch chưa được xóa; giữ rule disabled' }
-Remove-Item -LiteralPath $LatchKeyFile, $OwnerFile
-```
+- Watcher thoát với mã 2 (không tự thử lại): xem `journalctl`, xử lý nguyên nhân (EC2 không dừng được, replay chưa đủ, Azure không ghi được), rồi quyết định promote thủ công theo 9.1.
+- Bảo trì có kế hoạch (stop/reboot VM, thử lỗi pod, rejoin, failback): `sudo touch /opt/dcs29/watcher.pause` trước, xóa file sau khi xong.
+- Không Start lại AWS cũ sau failover. Rejoin và failback theo 9.1; sau khi AWS lại là primary và Azure lại là standby, xóa `/opt/dcs29/failover-incident.json` và `sudo systemctl restart dcs29-watcher` để cài lại.
 
-Kiểm tra CloudWatch alarm về OK trước bật lại rule:
+#### 6. Chi phí và dọn dẹp
 
-```powershell
-aws cloudwatch describe-alarms --alarm-names dcs29-auto-failover --query 'MetricAlarms[].StateValue' --region us-east-1
-aws events enable-rule --name dcs29-auto-failover --region us-east-1
-```
-
-Terraform có thể sửa drift Enabled/Disabled của rule ở apply sau; không apply trong lúc đang maintenance/rejoin. Latch không có TTL và không tự mở lại, kể cả khi workflow fail; đây là bước xác nhận thủ công để tránh tự động chạy incident mới trên topology sau failover chưa được phục hồi.
-
-#### 7. Chi phí và cleanup
-
-Ngoài CloudWatch/EventBridge/Lambda/Step Functions còn có DynamoDB on-demand (vài record/request incident) và SSM hybrid. Run Command trên Azure hiện tính 0,002 USD/invocation; workflow gửi preflight/promote, polling không phải gửi command mới. Logs Lambda giữ 7 ngày. Không có NAT Gateway, Lambda không gắn VPC. Chi phí thực tế còn phụ thuộc region, hạn mức miễn phí, logs và số retry; không đảm bảo tổng bằng 0.
-
-Khi dọn lab: disable rule, bảo đảm không còn execution/SSM command active, sao lưu DB/evidence. Deregister đúng hybrid node và xóa parameter do bootstrap tạo trước khi destroy:
-
-```powershell
-aws ssm deregister-managed-instance --instance-id $AzureNode --region us-east-1
-aws ssm delete-parameter --name /dcs29/dr/azure-node --region us-east-1
-```
-
-SSM identity/agent trong VM và parameter tạo qua bootstrap không tự rollback khi bỏ resource Terraform. Không deregister để retry khi VM vẫn đang phục vụ; phục hồi registration có kế hoạch. Destroy latch/workflow không khôi phục role database hay thay rejoin/failback.
-
+Watcher không tạo dịch vụ AWS tính phí theo giờ: chỉ có gọi API (`DescribeInstances`, `GetHealthCheckStatus`) mỗi chu kỳ, trong mức miễn phí hoặc không đáng kể, và health check Route 53 vốn đã có ở GĐ6. Khi dọn lab: `sudo systemctl disable --now dcs29-watcher` trên VM Azure, rồi `terraform destroy` (user và access key bị xóa nhờ `force_destroy`). Credential và tệp watcher trên VM sẽ mất khi VM bị hủy; nếu VM được giữ, xóa `/etc/dcs29/watcher-aws-credentials` thủ công.
 
 ## 10. Giám sát và nghiệm thu
 
@@ -794,7 +677,7 @@ Monitoring và phép đo RTO/RPO chưa được Terraform triển khai. Các l�
 
 ### Giai đoạn 7 — Monitoring và observability độc lập
 
-**Đầu vào:** GĐ5/GĐ6 đã pass với domain của bạn. Trước khi bật stack, thay **ba target URL trong `observability/prometheus.yml`** bằng hostname của bạn theo domain/IP ở phần 3; file trong repo chỉ là cấu hình của một lượt lab, không phải giá trị mặc định để dùng nguyên.
+**Đầu vào:** GĐ5/GĐ6 đã pass với domain của bạn. Trước khi bật stack, thay **các target URL trong `observability/prometheus.yml`** (ba dòng của job `blackbox_https`, hai dòng của job `blackbox_writer`) bằng hostname của bạn theo domain/IP ở phần 3; file trong repo chỉ là cấu hình của một lượt lab, không phải giá trị mặc định để dùng nguyên.
 **Mục tiêu:** thu bằng chứng availability/latency từ laptop bên ngoài AWS để monitoring vẫn sống khi EC2 bị dừng.
 
 > **Ghi chú ngay lúc này:** Bạn có thể để **cả EC2 và Azure VM tắt** trong lúc nghỉ. Bộ monitoring ở GD7 chạy trên **laptop Windows**, độc lập với hai VM. Khi hai VM tắt, cả ba probe sẽ báo lỗi; đó là kết quả đúng, không phải cấu hình hỏng. Chỉ bật hai VM ở bước 7.6 trước khi xác nhận hệ thống healthy và thử failover. Route 53 health checks/hosted zone vẫn tồn tại và có thể tiếp tục phát sinh phí dù máy đã tắt. Docker Desktop/Prometheus/Grafana trên laptop chỉ ghi số liệu khi laptop và Docker đang chạy.
@@ -811,7 +694,7 @@ docker compose --env-file observability/.env -f observability/compose.yaml ps --
 
 **Cập nhật Issues/K3s:** giữ các bước Docker Desktop, Prometheus/Grafana và tạo panel dưới đây. Docker Compose ở chương này chạy trên **laptop monitor**, không trên hai VM app. HTTP liveness, database writer readiness và pod state là ba tín hiệu khác nhau. /health/database Azure standby khỏe trả 503, không dùng nó làm probe sống của Azure.
 
-Trước mục 7.3, sửa ba URL target trong observability/prometheus.yml sang hostname thật với /health/live để đo process/TLS; cấu hình repo cũ còn /health/ready nên phải sửa rõ ràng. Liveness 200 không chứng minh DB/schema/ghi hoạt động; thêm kiểm tra DB/Issues riêng ở 7.11.
+Trước mục 7.3, sửa các URL target trong observability/prometheus.yml (ba của `blackbox_https`, hai của `blackbox_writer`) sang hostname thật; `blackbox_https` dùng /health/live để đo process/TLS, `blackbox_writer` dùng /health/database để thấy origin nào đang nhận ghi. Liveness 200 không chứng minh DB/schema/ghi hoạt động; thêm kiểm tra DB/Issues riêng ở 7.11.
 
 #### 0. Bản đồ thao tác — đọc trước khi làm
 
@@ -864,7 +747,7 @@ notepad observability/prometheus.yml
 
 Trong `.env`, thay giá trị sau dấu `=` bằng mật khẩu riêng, lưu và đóng. Không thêm dấu nháy hoặc khoảng trắng ở hai đầu. File `.env` đã được `.gitignore`; không commit hoặc gửi lên chat. Nếu đã có `.env`, bỏ qua `Copy-Item` để tránh ghi đè mật khẩu.
 
-Trong `prometheus.yml`, tìm **ba dòng `targets` dưới job `blackbox_https`** và thay URL thành `https://aws-origin.YOUR_DOMAIN/health/live`, `https://azure-origin.YOUR_DOMAIN/health/live`, `https://app.YOUR_DOMAIN/health/live` sau khi thay `YOUR_DOMAIN` bằng domain thật. Giữ nguyên label `target_name` tương ứng. Lưu file, đọc lại ba URL để chắc chắn không còn hostname/IP của người triển khai khác. Chỉ sau bước này mới chạy `docker compose ... up -d` ở 7.3.
+Trong `prometheus.yml`, tìm **ba dòng `targets` dưới job `blackbox_https`** và thay URL thành `https://aws-origin.YOUR_DOMAIN/health/live`, `https://azure-origin.YOUR_DOMAIN/health/live`, `https://app.YOUR_DOMAIN/health/live` sau khi thay `YOUR_DOMAIN` bằng domain thật. Làm tương tự với **hai dòng `targets` dưới job `blackbox_writer`**: `https://aws-origin.YOUR_DOMAIN/health/database` và `https://azure-origin.YOUR_DOMAIN/health/database`. Giữ nguyên label `target_name` tương ứng. Lưu file, đọc lại các URL để chắc chắn không còn hostname/IP của người triển khai khác. Chỉ sau bước này mới chạy `docker compose ... up -d` ở 7.3.
 
 ##### 7.3. LAPTOP — bật stack monitoring
 
@@ -889,7 +772,7 @@ Hai cổng chỉ bind `127.0.0.1` của laptop. Không cần mở inbound 3000/9
 ##### 7.4. LAPTOP — hiểu ba file cấu hình trước khi xem số liệu
 
 - `observability/blackbox.yml`: GET HTTPS `/health/live`, chỉ chấp nhận HTTP `200`, kiểm tra TLS certificate thật, dùng IPv4, timeout 7 giây. **Không dùng `curl -k` hoặc `insecure_skip_verify`**.
-- `observability/prometheus.yml`: mỗi 10 giây gọi Blackbox `/probe` cho ba URL, timeout scrape 8 giây. Nhãn `target_name` giữ tên dễ đọc. `prometheus` tự scrape chính nó.
+- `observability/prometheus.yml`: mỗi 10 giây gọi Blackbox `/probe` cho ba URL `/health/live` (job `blackbox_https`) và hai URL `/health/database` (job `blackbox_writer`), timeout scrape 8 giây. Ở job `blackbox_writer`, `probe_success=1` chỉ có ở origin đang là writer; standby luôn là 0 và đó là trạng thái đúng. Nhãn `target_name` giữ tên dễ đọc. `prometheus` tự scrape chính nó.
 - `observability/compose.yaml`: retention 7 ngày; Grafana đọc Prometheus qua mạng Docker nội bộ `http://prometheus:9090`, nên trong Grafana **không nhập `localhost:9090`** làm datasource.
 
 Xem log nếu container vừa khởi động xong mà UI chưa lên:
@@ -936,6 +819,8 @@ Hai DNS origin phải trả đúng IP trên; ba lệnh readiness phải thành c
 
 ##### 7.8. LAPTOP / GRAFANA — tạo dashboard theo từng panel
 
+> Repo đã có sẵn dashboard `DCS29 - Failover` (provisioning trong `observability/grafana/dashboards/`): panel Writer cho thấy origin nào nhận ghi, hai panel còn lại là health và thời gian phản hồi. Các bước tạo panel thủ công bên dưới chỉ cần khi muốn thêm panel riêng.
+
 1. Grafana → **Dashboards → New → New dashboard → Add visualization** → chọn datasource **Prometheus**.
 2. Tạo từng panel từ bảng dưới. Trong editor panel, chọn loại hiển thị; nhập PromQL ở ô query; đổi **Title**; **Apply/Back to dashboard**; lặp lại. Với panel có ba series, đặt legend `{{target_name}}` để phân biệt AWS/Azure/domain. Chọn time range `Last 30 minutes` và refresh `10s` ở góc dashboard. UI có thể thay đổi tên nút giữa các phiên bản.
 
@@ -949,7 +834,7 @@ Hai DNS origin phải trả đúng IP trên; ba lệnh readiness phải thành c
 
 3. Bấm **Save dashboard**, đặt tên ví dụ `DCS29 - Multi-cloud external health`. Chọn timezone **UTC** trong dashboard settings nếu UI có, hoặc ghi rõ timezone đang hiển thị trong báo cáo. Mốc đo ở GD8 phải ghi UTC.
 4. Để đánh dấu lần test: trong dashboard, tạo **Annotation** tại thời điểm bạn dừng/khôi phục app (tùy phiên bản Grafana: Ctrl+click vào biểu đồ, hoặc menu annotation của dashboard). Nội dung ngắn, ví dụ `t_action stop AWS app`, `t_detect Route53 unhealthy`, `t_first_B first azure-standby`, `t_stable shared healthy`, kèm UTC. Đây là mốc thao tác thủ công, không suy ra từ riêng đồ thị 10 giây.
-5. Export dashboard JSON qua menu **Share/Export → Export as JSON** hoặc **Dashboard settings → JSON model** (vị trí tùy phiên bản), lưu trong `observability/grafana/dcs29-dashboard.json` nếu muốn version-control. Kiểm tra JSON không chứa password/token trước khi commit. Screenshot chỉ là hình minh họa; JSON + dữ liệu thô mới đủ tái kiểm tra.
+5. Export dashboard JSON qua menu **Share/Export → Export as JSON** hoặc **Dashboard settings → JSON model** (vị trí tùy phiên bản), lưu trong `observability/grafana/dashboards/` (thư mục này được Grafana tự nạp, đã có `dcs29-failover.json`) nếu muốn version-control. Kiểm tra JSON không chứa password/token trước khi commit. Screenshot chỉ là hình minh họa; JSON + dữ liệu thô mới đủ tái kiểm tra.
 
 **Lưu ý về app metrics:** `/metrics` trong FastAPI có `dcs29_http_requests_total` và `dcs29_http_request_duration_seconds`. Cấu hình GD7 **chưa scrape hai endpoint này** để không phụ thuộc vào việc mở metrics qua Internet. Do đó panel request rate và latency **bên trong app** chưa có dữ liệu. Đừng tạo panel rồi diễn giải `No data` thành ứng dụng không có request. Nếu cần các panel này ở giai đoạn sau, thiết kế đường truy cập bảo vệ `/metrics` (ví dụ VPN/SSH tunnel hoặc allowlist ổn định) rồi mới thêm scrape job; không thêm `https://.../metrics` công khai chỉ cho tiện demo. Hãy kiểm tra ingress Traefik hiện tại: nếu URL `/metrics` đang được truy cập từ Internet, endpoint đó đang public từ GD5 và nên được hạn chế trước khi triển khai thật.
 
@@ -1000,7 +885,7 @@ Nếu muốn quan sát một vòng cloud failover, thực hiện đủ fencing/W
 | shared-domain healthy | Người dùng mới có thể tới một origin healthy; không xác định được AWS hay Azure chỉ từ metric này |
 | Khoảng trắng trên biểu đồ | Có thể do laptop/Docker/Prometheus ngừng chạy hoặc mất Internet; không tự coi là downtime website |
 
-Khoảng lấy mẫu 10 giây không thể xác định thời điểm sự kiện chính xác tới từng giây. Route 53 có chu kỳ health check và DNS cache riêng; so sánh các timestamp ở GD8 với sai số lấy mẫu và cache. Ba probe không thay thế được log client hoặc phép đo k6. Monitor trên laptop không phải dịch vụ giám sát 24/7.
+Khoảng lấy mẫu 10 giây không thể xác định thời điểm sự kiện chính xác tới từng giây. Route 53 có chu kỳ health check và DNS cache riêng; so sánh các timestamp ở GD8 với sai số lấy mẫu và cache. Các probe không thay thế được log client hoặc phép đo của `scripts/probe_failover.py`. Monitor trên laptop không phải dịch vụ giám sát 24/7.
 
 
 #### Khi gặp lỗi
@@ -1129,7 +1014,7 @@ Grafana cập nhật sau scrape; kiểm tra CPU/RAM và cùng image/DSN. Sau th�
 
 Tiếp theo thêm node exporter/collector PostgreSQL qua đường quản trị bảo vệ, theo dõi disk, CPU/RAM, role, sender/receiver và WAL lag. /api/database/status hiện cho biết role/LSN nhưng không phải endpoint Prometheus; cần exporter/collector để chuyển thành metric, không thêm nó vào scrape_configs rồi mong tự parse JSON.
 
-Ghi CPU credit từ cloud metrics khi tích hợp. Prometheus/Grafana không tự fence/promote PostgreSQL; tự động hóa cloud cần điều phối GĐ6. Hoàn tất GĐ7 khi pod fail/recover/scale và tín hiệu DB được kiểm chứng, không chỉ ba probe HTTP.
+Ghi CPU credit từ cloud metrics khi tích hợp. Prometheus/Grafana không tự fence/promote PostgreSQL; việc đó do các lệnh GĐ6 hoặc watcher GĐ6B làm. Hoàn tất GĐ7 khi pod fail/recover/scale và tín hiệu DB được kiểm chứng, không chỉ ba probe HTTP.
 
 #### Điều kiện hoàn thành GD7
 
@@ -1163,7 +1048,7 @@ Nguồn kỹ thuật: [Docker Desktop Windows](https://docs.docker.com/desktop/s
 - Hai origin và shared HTTPS pass.
 - Writer check AWS healthy, Azure standby check unhealthy đúng role; process/TLS probe hai origin healthy.
 - Monitoring nằm ngoài AWS.
-- Máy k6/probe không sleep, clock đồng bộ.
+- Máy chạy probe (laptop) không sleep, clock đồng bộ.
 - Budget và cleanup owner được xác nhận.
 - Run manifest ghi commit, digest, TTL, health interval/threshold, replica, client DNS mode và tải.
 
@@ -1200,7 +1085,7 @@ Ghi IssueId, request_id, version, response và UTC. Retry cùng thao tác dùng 
 
 ##### 2.3. Tải và script cũ
 
-Script tests/load/failover.js hiện gọi /api/devices, chỉ kiểm chứng workload dashboard/read-only. Có thể giữ phép đo HTTP 10 request/giây trong 10 phút để tham khảo, nhưng không lấy đó làm bằng chứng replication giao dịch Issues.
+Dùng `scripts/probe_failover.py`: mỗi tick có một lần ghi (`POST /api/ping`) có số thứ tự tăng dần, đi qua cùng khóa ghi với Issues. Sau lượt đo, script hỏi writer mới những `seq` nào đã ACK mà không còn, đó là số ghi bị mất (RPO đo được). Chạy `python scripts/seed_demo.py --url <URL chung>` trước để demo có sẵn dữ liệu. Phép đo này không thay vòng nghiệp vụ Issues ở 2.2.
 
 Kịch bản tải Issues phải bổ sung request_id riêng, version phù hợp, lưu ACK/receipt và đối chiếu dữ liệu; chưa có script này trong repo. Nếu không viết load script, vẫn làm đủ vòng nghiệp vụ/role/WAL phía trên và ghi phạm vi phép đo. Khi tăng tải theo dõi dropped_iterations, CPU credit và RAM 4 GiB.
 
@@ -1208,7 +1093,7 @@ Kịch bản tải Issues phải bổ sung request_id riêng, version phù hợp
 
 ##### Client mặc định
 
-Giữ DNS/connection settings k6 mặc định, ghi rõ k6 version và resolver. Kết quả phản ánh client đó, không đại diện mọi browser.
+Giữ DNS/connection settings mặc định của client probe (httpx trong `probe_failover.py`, `trust_env=False` nên không đi qua proxy hệ thống), ghi rõ phiên bản Python/httpx và resolver. Kết quả phản ánh client đó, không đại diện mọi browser.
 
 ##### DNS experiment
 
@@ -1243,7 +1128,7 @@ F2 là bằng chứng chính; F5 không thay thế F2. Mỗi scenario tối thi�
 1. Tạo run ID, thư mục output và manifest.
 2. Xác nhận version/digest/role/WAL và dữ liệu Issues hai origin.
 3. Xác nhận writer checks đúng role, process probes và Grafana có dữ liệu.
-4. Bắt đầu Prometheus/Grafana, probe CSV và k6.
+4. Bắt đầu Prometheus/Grafana và `scripts/probe_failover.py` (ra `probe.csv` và `probe.summary.json`).
 5. Chạy baseline đủ 3 phút.
 6. Ghi UTC gửi lệnh stop EC2 (`t_action`).
 7. Ghi external origin down (`t0`).
@@ -1280,7 +1165,7 @@ Mỗi run lưu:
 - `manifest.yaml`: scenario/config/digest/TTL.
 - `incident.csv`: event và UTC.
 - `probe.csv`.
-- `k6.json` hoặc summary.
+- `probe.summary.json` (downtime, lỗi, p95, ghi bị mất).
 - Prometheus/Grafana export.
 - AWS/Azure/Route 53 snapshots.
 - `analysis.md` nêu kết quả và anomaly.
@@ -1302,7 +1187,7 @@ Kết luận cần trả lời:
 
 #### 10. Lỗi/threats to validity
 
-- DNS/OS/browser/k6 cache.
+- DNS/OS/browser cache.
 - HTTP keep-alive.
 - Clock lệch.
 - Chỉ chạy một lượt.
@@ -1322,7 +1207,7 @@ Export evidence trước. Dừng/xóa đúng resources theo inventory: EC2, EBS 
 #### 12. Checklist nghiệm thu
 
 - [ ] Có B0, B1, F2, F3; F2 chạy ít nhất 3 lượt.
-- [ ] Probe/k6/monitor chạy ngoài AWS.
+- [ ] Probe/monitor chạy ngoài AWS.
 - [ ] Timeline đủ `t_action/t0/t_detect/t_first_B/t_stable`.
 - [ ] Có error rate/downtime/latency, RTO ghi và RPO thực tế.
 - [ ] Có issue/comments/history/receipt trước-sau, không hai writer.
@@ -1352,7 +1237,7 @@ Không đổi `postgres_image` để nâng major: automation chỉ chấp nhận
 
 Nếu đang ở trạng thái sau failover, không chạy lại automation initial deployment để cập nhật app; thực hiện cập nhật có kiểm soát theo role hiện tại và hoàn tất failback/rejoin trước.
 
-Nếu bật GĐ6B, trước bảo trì/update/rejoin/destroy hãy disable EventBridge rule, xác nhận mọi execution/SSM command đã terminal theo mục 9.2. Không dùng `enable_auto_failover=false` như nút pause. Khi dọn lab, deregister đúng hybrid node và xóa parameter theo mục 9.2 trước destroy.
+Nếu bật GĐ6B, trước bảo trì/update/rejoin/destroy hãy tạo `/opt/dcs29/watcher.pause` trên VM Azure (mục 9.2, bước 5). Không dùng `enable_auto_failover=false` như nút pause. Khi dọn lab, dừng dịch vụ watcher theo mục 9.2, bước 6 trước destroy.
 
 Trước dọn lab: export evidence, sao lưu PostgreSQL ra ngoài VM, xác định disk/PVC đang dùng. Xóa access key Certbot Azure đã tạo thủ công trước khi xóa IAM user; cập nhật nameserver tại registrar nếu không dùng zone nữa. Từ PowerShell laptop, ở `deploy/terraform`, xem kỹ danh sách tài nguyên sẽ bị xóa:
 
@@ -1383,7 +1268,7 @@ Nếu mới xong lượt 1, hệ thống chỉ có HTTP trên hai IP; chưa sẵ
 1. Kiểm tra AWS primary/writable và Azure standby/streaming theo mục 7.1.
 2. Làm mục 8.1–8.4: delegate domain, chuẩn bị quyền DNS Azure, bật HTTPS và kiểm tra certificate/redirect.
 3. Làm mục 9: bật health checks trước, xác nhận AWS Healthy/Azure Unhealthy, rồi bật DNS failover bằng lượt apply riêng.
-4. Làm mục 10.1: sửa ba URL probe sang domain thật và `/health/live`, bật monitoring trên laptop, tạo dashboard. Nếu hai VM đang chạy sau apply thì **bỏ qua bước thử khi VM tắt và bước Start VM**; không stop/start chỉ để cài monitoring.
+4. Làm mục 10.1: sửa các URL probe (ba `/health/live`, hai `/health/database`) sang domain thật, bật monitoring trên laptop, tạo dashboard. Nếu hai VM đang chạy sau apply thì **bỏ qua bước thử khi VM tắt và bước Start VM**; không stop/start chỉ để cài monitoring.
 5. Diễn tập thủ công đầy đủ mục 13 này trước. Chỉ khi đã failback và trở lại baseline mới cân nhắc bật GĐ6B bằng mục 9.2. Đây là lựa chọn thêm; demo thủ công không cần lượt apply GĐ6B.
 
 **Kết quả cần có:** HTTPS hai origin và shared domain hoạt động; cùng commit ứng dụng; một writer AWS và một standby Azure; Grafana có dữ liệu probe. Apply thành công một lượt chưa thay thế các kiểm tra trên.
@@ -1452,7 +1337,7 @@ Lưu baseline:
 Save-DemoEvent 'baseline_verified'
 ```
 
-**Mở sẵn trên trình duyệt:** `$SharedUrl/issues.html`, `$AzureUrl/issues.html`, Grafana `http://localhost:3000` và Route 53 Health checks. Nếu demo tự động, mở thêm Step Functions ở us-east-1. Trong Grafana chọn khoảng thời gian 15–30 phút gần nhất và refresh phù hợp với scrape 10 giây. Trước sự cố, `probe_success{job="blackbox_https"}` của cả ba URL `/health/live` phải là 1; chỉ số này đo process/HTTPS, không chứng minh database ghi được.
+**Mở sẵn trên trình duyệt:** `$SharedUrl/issues.html`, `$AzureUrl/issues.html`, Grafana `http://localhost:3000` và Route 53 Health checks. Nếu demo tự động, mở thêm một terminal chạy `journalctl -u dcs29-watcher -f` trên VM Azure. Trong Grafana chọn khoảng thời gian 15–30 phút gần nhất và refresh phù hợp với scrape 10 giây. Trước sự cố, `probe_success{job="blackbox_https"}` của cả ba URL `/health/live` phải là 1; chỉ số này đo process/HTTPS, không chứng minh database ghi được.
 
 Không tiếp tục nếu baseline sai. Nếu VM vừa reboot, xử lý guard theo mục 7.3 chỉ khi biết chắc chưa có failover; nếu writer đã đổi, dùng mục 9.1 để recovery.
 
@@ -1499,6 +1384,8 @@ Không gây lỗi khi dữ liệu demo chưa đến Azure. Có thể gõ thêm m
 
 ### 13.5. LAPTOP — chạy probe ghi CSV trong cửa sổ riêng
 
+> **Khuyến nghị:** dùng `scripts/probe_failover.py` thay cho script PowerShell dưới đây. Nó mỗi giây gọi `GET /version` và `POST /api/ping`, ghi `probe.csv`, và khi kết thúc tự tính downtime đọc/ghi, tỷ lệ lỗi, p50/p95 và số lần ghi đã ACK nhưng không còn trên writer mới (xem [đo đạc failover](../../DO_DAC_FAILOVER.md)). Script PowerShell chỉ đọc `/version` và giữ lại cho máy không có Python.
+
 Mở **PowerShell thứ hai**, điền hai giá trị bằng `$SharedUrl` và `$EvidenceDir` từ phiên điều khiển. Chạy trước khi gây lỗi, dừng bằng Ctrl+C sau khi failback hoàn tất:
 
 ```powershell
@@ -1531,7 +1418,7 @@ while ($true) {
 }
 ```
 
-Dự kiến ban đầu các dòng status 200/environment aws. Mỗi vòng gồm thời gian request **cộng** một giây nghỉ, nên khi timeout không phải mẫu đúng mỗi giây. Probe `/version` đo tuyến và ứng dụng; RTO ghi phải lấy từ giao dịch ghi thành công ở bước 13.7. Đây không phải script tải Issues/k6 và không đo toàn bộ RPO; phép đo nâng cao làm theo mục 10.2.
+Dự kiến ban đầu các dòng status 200/environment aws. Mỗi vòng gồm thời gian request **cộng** một giây nghỉ, nên khi timeout không phải mẫu đúng mỗi giây. Probe `/version` đo tuyến và ứng dụng; RTO ghi phải lấy từ giao dịch ghi thành công ở bước 13.7. Đây không phải script tải Issues và không đo toàn bộ RPO; phép đo nâng cao làm theo mục 10.2.
 
 ### 13.6. Gây sự cố — chọn đúng một chế độ
 
@@ -1571,10 +1458,10 @@ Dự kiến ban đầu các dòng status 200/environment aws. Mỗi vòng gồm 
 
 **B. Demo tự động (GĐ6B đã được nghiệm thu và bật)**
 
-1. Trước Stop, kiểm tra baseline, alarm OK, rule Enabled, SSM Online và đã rearm latch/incident theo mục 9.2 nếu có lượt cũ. Không bật tự động lần đầu ngay trước buổi trình bày.
+1. Trước Stop, kiểm tra baseline, `systemctl status dcs29-watcher` là active, không có `watcher.pause`, và đã xóa `failover-incident.json` theo mục 9.2 nếu có lượt cũ. Không bật tự động lần đầu ngay trước buổi trình bày.
 2. Thực hiện Stop đúng EC2 và ghi hai mốc thời gian như chế độ A.
-3. Theo dõi Step Functions và SSM theo mục 9.2, bước 5. **Không chạy lệnh promote/gate thủ công của chế độ A** trong khi controller còn hoạt động.
-4. Sau execution thành công, kiểm tra Azure `/api/database/status`, `/health/database`, AWS Stopped và shared domain. Nếu workflow lỗi/timeout, kiểm tra execution/SSM command và role thực tế theo mục 9.2, bước 6 trước thao tác khác; không suy đoán promotion chưa xảy ra.
+3. Theo dõi `journalctl -u dcs29-watcher -f` theo mục 9.2, bước 4. **Không chạy lệnh promote/gate thủ công của chế độ A** trong khi watcher còn hoạt động.
+4. Sau khi watcher báo Azure là writer, kiểm tra Azure `/api/database/status`, `/health/database`, AWS Stopped và shared domain. Nếu watcher thoát mã 2, kiểm tra `journalctl` và role thực tế theo mục 9.2, bước 5 trước thao tác khác; không suy đoán promotion chưa xảy ra.
 
 Ở cả hai chế độ, Grafana AWS process probe sẽ về 0; Azure process probe vẫn 1; shared có thể lỗi rồi về 1. Website giữ cùng URL. DNS/cache và thời gian điều phối có thể làm chuyển đổi mất vài phút; không coi 30 giây của health check là RTO.
 
@@ -1614,7 +1501,7 @@ Trên website chung tải lại issue, chỉ rõ bình luận trước/sau sự 
 
 Phần này cần nhiều thao tác; **diễn tập trước và dành thời gian riêng**, không bấm Start AWS rồi trông chờ DNS tự khôi phục dữ liệu.
 
-1. Nếu dùng tự động, làm mục 9.2, bước 6: disable EventBridge rule, xác nhận mọi execution/SSM command đã terminal. Không tiếp tục khi còn command đang chạy hoặc role chưa rõ. Không đổi flag Terraform để pause controller.
+1. Nếu dùng tự động, làm mục 9.2, bước 5: tạo `watcher.pause`. Không tiếp tục khi chưa rõ role thực tế của hai database. Không đổi flag Terraform để pause watcher.
 2. Ghi `Save-DemoEvent 'aws_rejoin_begin'`. AWS Console → Start đúng EC2 đã fence. Guard phải giữ K3s dừng; mở SSH AWS bằng `ssh -i $SshKey "ubuntu@$AwsIp"`. **Không touch marker phê duyệt restart lúc này.**
 3. Làm đầy đủ mục 9.1, bước **8.1–8.3 trên AWS**: xác minh primary cũ dừng → tạo PVC mới → clone từ Azure `10.200.29.2` → cập nhật manifest bằng K3s không agent → bật database/app sau khi workload đã trỏ storage mới. Dùng đúng PostgreSQL digest hiện tại. Các bước YAML/Python có sẵn ở mục đó; không bỏ qua hoặc apply manifest primary cũ.
 4. Trong phiên điều khiển laptop:
@@ -1650,14 +1537,14 @@ Phần này cần nhiều thao tác; **diễn tập trước và dành thời gi
 
 5. Start Azure với guard giữ K3s dừng; làm lại mục 9.1, bước **8.1–8.3 trên Azure**, source AWS `10.200.29.1`, PVC mới. Không bật lại PostgreSQL Azure primary trên storage cũ. Khi thao tác failback đã hoàn tất, Azure phải là standby streaming.
 6. Gửi một bình luận mới qua shared domain/website sau failback, xác nhận xuất hiện trên Azure. Dùng request ID mới cho **nội dung mới**; kiểm tra lại role, commit, ID/version/comments/history và chỉ một writer như bước 13.3.
-7. Nếu dùng tự động, chỉ rearm theo mục 9.2, bước 6 sau khi topology và commands đã được xác minh, alarm về OK. Nếu chưa định chạy lại tự động, giữ rule disabled và ghi trạng thái đó trong biên bản; không đánh dấu hệ thống sẵn sàng demo tự động.
+7. Nếu dùng tự động, chỉ rearm (xóa `failover-incident.json`, restart watcher) theo mục 9.2, bước 5 sau khi topology đã được xác minh. Nếu chưa định chạy lại tự động, giữ `watcher.pause` và ghi trạng thái đó trong biên bản; không đánh dấu hệ thống sẵn sàng demo tự động.
 
 **Kết quả hoàn thành:** AWS primary/writable, Azure standby/streaming/read-only; shared URL AWS; dữ liệu tạo trên Azure vẫn tồn tại trên cả hai bên; không có hai writer. AWS writer check Healthy, Azure writer check Unhealthy, còn ba process probes `/health/live` về 1.
 
 ### 13.10. Lưu bằng chứng và checklist trước buổi trình bày
 
 1. Ghi `Save-DemoEvent 'demo_cycle_complete'`, dừng probe bằng Ctrl+C. Giữ `incident.csv`, `probe.csv` và các file JSON. Lưu ảnh Grafana cả giai đoạn AWS → Azure → AWS, trạng thái fencing, writer health và issue/history. Không chụp Secret/credential.
-2. Nếu dùng GĐ6B, lưu execution ARN, trạng thái và mốc Step Functions/SSM. Ghi rõ chế độ thủ công hay tự động; không dùng kết quả thủ công để tuyên bố tự động đã pass.
+2. Nếu dùng GĐ6B, lưu log `journalctl -u dcs29-watcher` và timeline của lượt chạy. Ghi rõ chế độ thủ công hay tự động; không dùng kết quả thủ công để tuyên bố tự động đã pass.
 3. Trong timeline, phân biệt thời điểm Stop yêu cầu, VM Stopped, origin được quan sát lỗi, shared Azure và ACK ghi đầu tiên. CSV `/version` không tự chứng minh RPO; muốn báo RPO phải đối chiếu giao dịch ACK/receipt theo mục 10.2. Các bước demo này chứng minh dữ liệu mẫu, không thay phép đo tải hay tối thiểu ba lượt nghiệm thu.
 4. Sao chép thư mục bằng chứng khỏi thư mục tạm, export dashboard JSON và chuẩn bị video của một lượt thành công. Nếu cần dọn lab sau cùng, làm mục 12 sau khi sao lưu database; không destroy ngay trước buổi demo.
 
@@ -1667,11 +1554,11 @@ Trước buổi demo, kiểm tra:
 - [ ] HTTPS/shared URL hoạt động, health checks đúng vai trò.
 - [ ] Monitoring chạy trên laptop, đúng domain, Grafana có dữ liệu gần nhất.
 - [ ] SSH hai VM dùng được; đã diễn tập rejoin/failback với release K3s pin hiện tại.
-- [ ] Đã chọn một chế độ demo; controller/latch đúng trạng thái nếu dùng tự động.
+- [ ] Đã chọn một chế độ demo; watcher đúng trạng thái (active, không pause, không còn incident cũ) nếu dùng tự động.
 - [ ] Có bản sao lưu ngoài VM, đủ dung lượng PVC mới và bằng chứng/video dự phòng.
 - [ ] Laptop không sleep, mạng ổn định; không đổi cấu hình/image trong lúc trình bày.
 
-**Nếu demo dừng giữa chừng:** ghi writer/phase thực tế, giữ bằng chứng và storage cũ. Không khởi động writer cũ để cứu màn hình. Dùng bảng lỗi ở mục 9.1 hoặc quy trình controller ở mục 9.2; chỉ tiếp tục khi fencing, role và command đang chạy đã được xác định.
+**Nếu demo dừng giữa chừng:** ghi writer/phase thực tế, giữ bằng chứng và storage cũ. Không khởi động writer cũ để cứu màn hình. Dùng bảng lỗi ở mục 9.1 hoặc mục 9.2 nếu dùng watcher; chỉ tiếp tục khi fencing và role của hai database đã được xác định.
 
 ## Khi gặp lỗi, reboot hoặc chuyển VM cũ
 
@@ -1804,6 +1691,6 @@ Không tự đăng ký domain/đổi NS tại registrar, tạo secret access key
 
 WireGuard, PostgreSQL/PVC, schema, standby, Secret/app và HTTP Ingress đã được triển khai. TLS/renewal đã có automation opt-in. Failover AWS → Azure đã có opt-in ở mục 9.2. Các phần có thể bổ sung tiếp là backup ngoài VM, monitoring, rejoin và failback có kiểm chứng fencing; những phần này vẫn chưa tự động hóa.
 
-Terraform có thể quản lý thêm tài nguyên và triển khai công cụ điều phối. Quy trình failover/failback database lúc sự cố nên do script/controller riêng xử lý với fencing và kiểm tra trạng thái; không coi một lần `terraform apply` là thao tác promote an toàn.
+Terraform có thể quản lý thêm tài nguyên và triển khai công cụ điều phối. Quy trình failover/failback database lúc sự cố nên do script hoặc watcher riêng xử lý với fencing và kiểm tra trạng thái; không coi một lần `terraform apply` là thao tác promote an toàn.
 
 [Quay lại nhánh tự động](README.md) · [Lộ trình chung](../README.md).

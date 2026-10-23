@@ -1,6 +1,6 @@
 # Giai đoạn 6 — Fencing, PostgreSQL failover/failback và Route 53
 
-**Đầu vào:** GĐ4–GĐ5 đạt trên hai VM; cùng image digest, schema và streaming, HTTPS/Ingress hợp lệ. **Trạng thái:** hướng dẫn thao tác có kiểm soát, chưa có script điều phối cloud đã nghiệm thu. Không chạy local_lifecycle.py nguyên xi trên VM.
+**Đầu vào:** GĐ4–GĐ5 đạt trên hai VM; cùng image digest, schema và streaming, HTTPS/Ingress hợp lệ. **Trạng thái:** hướng dẫn thao tác có kiểm soát, chưa có script điều phối cloud đã nghiệm thu. Không chạy scripts/local_replication.py nguyên xi trên VM.
 
 ## Đọc nhanh trước khi triển khai
 
@@ -24,7 +24,7 @@ Một writer: ban đầu AWS primary, Azure standby. Pod app lỗi thì K3s hồ
 - SSH: kiểm tra/chuyển role PostgreSQL và Kubernetes.
 - PowerShell laptop: probe shared hostname, DNS, identity và dữ liệu.
 
-Runbook này là GĐ6A, thực hiện thủ công trước. Sau diễn tập và trở về AWS primary/Azure standby, có thể tạo [controller tự động GĐ6B bằng Console](GIAI_DOAN_06B_FAILOVER_TU_DONG.md). Nếu đã bật controller, Disable EventBridge rule và xác nhận execution/SSM command đã terminal trước chạy chuyển role thủ công; không promote tay song song với workflow.
+Runbook này là GĐ6A, thực hiện thủ công trước. Sau diễn tập và trở về AWS primary/Azure standby, có thể bật [watcher failover tự động](../tu_dong/AUTOMATION_FAILOVER.md) bằng nhánh Terraform. Nếu đã cài watcher, tạo `/opt/dcs29/watcher.pause` trên VM Azure trước khi chạy chuyển role thủ công; không promote tay song song với watcher.
 
 ## 2. LAPTOP — kiểm tra đầu vào
 
@@ -108,6 +108,8 @@ Kiểm tra Azure sống/đọc bằng /api/database/status và /api/issues. Ch�
 Health check HTTPS của Route 53 không thay kiểm tra certificate như browser/curl. Xác nhận SNI/path/IP và TLS riêng theo GĐ5. [AWS health-check behavior](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/dns-failover-determining-health-of-endpoints.html).
 
 ## 4. Chuyển role database — trước khi thử DNS failover
+
+> **Tương ứng với script local:** 4.1 + 4.2 + 4.3 là `switchover` (AWS còn sống, không mất dữ liệu); khi AWS đã sập thật bỏ 4.1 và làm 4.2 + 4.3, tương ứng `failover` (có thể mất giao dịch chưa kịp replicate). Watcher của nhánh Terraform tự thực hiện đúng chuỗi `failover` này.
 
 **Thứ tự thao tác:** đọc mục này trước để hiểu runbook, nhưng tạo record ở mục 5 và xác nhận baseline AWS ở mục 6 trước khi thực hiện chuyển role. Các lệnh mục 4 chỉ chạy trong lượt thử chuyển đổi đã chuẩn bị; không promote ngay khi đang tạo health checks.
 
@@ -217,7 +219,7 @@ Khi cả hai writer check unhealthy, Route 53 có thể vẫn trả record theo 
 
 Giữ cùng URL HTTPS /issues.html, tạo/sửa/bình luận/đóng issue trên Azure. Ghi ID/version/request_id, nội dung và lịch sử. Retry không trùng; bản nháp chưa gửi vẫn ở cùng localStorage và không phải giao dịch DB đã commit.
 
-Giữ AWS cũ bị fence. Không Start EC2 với PostgreSQL primary cũ tự khởi động; trước khi bật lại phải có cơ chế chặn workload DB cũ và endpoint writer. Startup guard và các bước rejoin chi tiết ở mục 8.1–8.4 bên dưới kiểm soát lần khởi động lại; GĐ6B có hướng dẫn controller tự động AWS → Azure, nhưng rejoin/failback vẫn làm theo runbook này.
+Giữ AWS cũ bị fence. Không Start EC2 với PostgreSQL primary cũ tự khởi động; trước khi bật lại phải có cơ chế chặn workload DB cũ và endpoint writer. Startup guard và các bước rejoin chi tiết ở mục 8.1–8.4 bên dưới kiểm soát lần khởi động lại; nhánh Terraform có watcher tự động AWS → Azure (xem [failover tự động](../tu_dong/AUTOMATION_FAILOVER.md)), nhưng rejoin/failback vẫn làm theo runbook này.
 
 ## 8. Rejoin AWS và failback có kiểm soát
 
@@ -389,7 +391,7 @@ Không apply lại `postgres-before-rejoin-<UTC>.yaml`: nó trỏ dữ liệu c�
 
 ### 8.4. Failback
 
-Nếu có GĐ6B, rule vẫn Disabled và mọi execution/SSM command phải terminal. Sau AWS standby đã bắt kịp, chạy drain/gate/WAL mục 4.1 **trên Azure primary**, so replay AWS. Stop Azure VM và đợi Stopped/Deallocated đúng máy. Promote AWS, mở gate theo mục 4.3; kiểm tra shared URL ghi được và Route 53 chọn AWS. Cuối cùng rejoin Azure bằng các bước 8.1–8.3 với source AWS `10.200.29.1`, PVC mới. Không init schema lần nữa.
+Nếu đã cài watcher, giữ file `watcher.pause` trong suốt bước này. Sau AWS standby đã bắt kịp, chạy drain/gate/WAL mục 4.1 **trên Azure primary**, so replay AWS. Stop Azure VM và đợi Stopped/Deallocated đúng máy. Promote AWS, mở gate theo mục 4.3; kiểm tra shared URL ghi được và Route 53 chọn AWS. Cuối cùng rejoin Azure bằng các bước 8.1–8.3 với source AWS `10.200.29.1`, PVC mới. Không init schema lần nữa.
 
 Nguồn: [K3s server flags, disable-agent](https://docs.k3s.io/cli/server), [pg_basebackup](https://www.postgresql.org/docs/17/app-pgbasebackup.html). Đây là runbook demo cần thử trên VM trước buổi đo; không phải hệ thống tự động recovery đã nghiệm thu.
 

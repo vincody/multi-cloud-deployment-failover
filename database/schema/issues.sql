@@ -17,3 +17,6 @@ CREATE INDEX IF NOT EXISTS issue_history_issue_idx ON issue_history(issue_id, id
 CREATE TABLE IF NOT EXISTS save_requests (
     request_id UUID PRIMARY KEY, payload JSONB NOT NULL, result JSONB NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now());
+CREATE TABLE IF NOT EXISTS probe_pings (
+    run_id TEXT NOT NULL, seq INTEGER NOT NULL, environment TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY (run_id, seq));

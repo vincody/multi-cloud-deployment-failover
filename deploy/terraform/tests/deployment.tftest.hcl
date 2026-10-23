@@ -1,11 +1,5 @@
 mock_provider "aws" {}
 mock_provider "azurerm" {}
-mock_provider "archive" {}
-
-# Route53 metrics and the controller live in us-east-1.
-mock_provider "aws" {
-  alias = "recovery"
-}
 
 variables {
   ssh_private_key_path  = "fixtures/operator-key"
@@ -59,8 +53,8 @@ run "infrastructure_only" {
   command = plan
   variables {
     enable_workload_automation = false
-    ssh_private_key_path      = ""
-    postgres_image            = ""
+    ssh_private_key_path       = ""
+    postgres_image             = ""
   }
   assert {
     condition     = length(terraform_data.workloads) == 0 && length(aws_vpc_security_group_ingress_rule.wireguard) == 0 && length(azurerm_network_security_rule.wireguard) == 0
@@ -107,26 +101,22 @@ run "reject_incomplete_automation_inputs" {
   expect_failures = [terraform_data.workloads]
 }
 
-run "automatic_failover_opt_in" {
+run "watcher_opt_in" {
   command = plan
   variables {
     enable_auto_failover = true
-    enable_https        = true
-    certificate_email   = "operator@example.com"
+    enable_https         = true
+    certificate_email    = "operator@example.com"
     enable_health_checks = true
-    enable_failover     = true
+    enable_failover      = true
   }
   assert {
-    condition     = aws_sfn_state_machine.dr[0].type == "STANDARD" && aws_cloudwatch_metric_alarm.dr[0].period == 60 && aws_cloudwatch_metric_alarm.dr[0].treat_missing_data == "notBreaching"
-    error_message = "The controller must use a Standard workflow and not promote on missing metrics."
+    condition     = length(terraform_data.watcher) == 1 && length(aws_iam_user.azure_watcher) == 1
+    error_message = "Enabling auto failover must install the watcher and create its IAM user."
   }
   assert {
-    condition     = jsondecode(templatefile("${path.module}/failover/workflow.json.tmpl", { lambda_arn = "arn:aws:lambda:us-east-1:000000000000:function:fixture" })).States.PromoteAzure.Parameters.Payload.action == "promote" && jsondecode(templatefile("${path.module}/failover/workflow.json.tmpl", { lambda_arn = "fixture" })).States.Fenced.Default == "FenceDelay"
-    error_message = "Promotion must follow confirmed fencing with bounded status polling."
-  }
-  assert {
-    condition     = aws_dynamodb_table.dr_latch[0].billing_mode == "PAY_PER_REQUEST" && !can(aws_dynamodb_table.dr_latch[0].ttl[0])
-    error_message = "The incident latch must not be automatically removed by Lambda."
+    condition     = toset(output.azure_watcher_permissions) == toset(["ec2:DescribeInstances", "ec2:StopInstances", "route53:GetHealthCheckStatus"])
+    error_message = "The watcher may only read instance and health state and stop the primary; it must not be able to start or reconfigure anything."
   }
   assert {
     condition     = azurerm_network_security_rule.wireguard[0].priority != azurerm_network_security_rule.https.priority
@@ -134,12 +124,47 @@ run "automatic_failover_opt_in" {
   }
 }
 
-run "reject_auto_failover_before_baseline" {
+run "watcher_user_first" {
+  command = plan
+  plan_options {
+    target = [aws_iam_user.azure_watcher, aws_iam_user_policy.azure_watcher]
+  }
+  variables {
+    enable_auto_failover = true
+  }
+  assert {
+    condition     = length(aws_iam_user.azure_watcher) == 1 && length(aws_iam_user_policy.azure_watcher) == 1
+    error_message = "The documented -target step must plan the watcher IAM user and policy without installing the watcher."
+  }
+}
+
+run "reject_watcher_before_baseline" {
   command = plan
   variables {
     enable_auto_failover = true
   }
-  expect_failures = [terraform_data.azure_ssm]
+  expect_failures = [terraform_data.watcher]
+}
+
+run "reject_watcher_with_bad_threshold" {
+  command = plan
+  variables {
+    enable_auto_failover = true
+    enable_https         = true
+    certificate_email    = "operator@example.com"
+    enable_health_checks = true
+    enable_failover      = true
+    watcher_threshold    = 1
+  }
+  expect_failures = [terraform_data.watcher]
+}
+
+run "no_watcher_by_default" {
+  command = plan
+  assert {
+    condition     = length(terraform_data.watcher) == 0 && length(aws_iam_user.azure_watcher) == 0
+    error_message = "The watcher and its IAM user must be opt-in."
+  }
 }
 
 run "failover_after_https" {
@@ -190,4 +215,50 @@ run "dns_after_healthy_checks" {
     condition     = length(aws_route53_record.app_primary) == 1 && length(aws_route53_record.app_secondary) == 1
     error_message = "Enabling failover must create both app CNAME records."
   }
+}
+
+run "dns_timing_is_configurable" {
+  command = plan
+
+  variables {
+    enable_health_checks           = true
+    enable_failover                = true
+    health_check_interval_seconds  = 10
+    health_check_failure_threshold = 2
+    dns_ttl_seconds                = 15
+  }
+
+  assert {
+    condition     = aws_route53_health_check.aws_origin[0].request_interval == 10 && aws_route53_health_check.aws_origin[0].failure_threshold == 2 && aws_route53_record.app_primary[0].ttl == 15
+    error_message = "Health check timing and the app CNAME TTL must follow the variables."
+  }
+
+  assert {
+    condition     = output.dns_failover_timing.health_check_detection_seconds == 20 && output.dns_failover_timing.app_cname_ttl_seconds == 15
+    error_message = "The timing output must report detection time as interval x threshold."
+  }
+}
+
+run "defaults_keep_the_documented_timing" {
+  command = plan
+
+  variables {
+    enable_health_checks = true
+    enable_failover      = true
+  }
+
+  assert {
+    condition     = output.dns_failover_timing.health_check_detection_seconds == 90 && output.dns_failover_timing.app_cname_ttl_seconds == 30
+    error_message = "Defaults must stay 30 s interval x 3 checks and a 30 s TTL."
+  }
+}
+
+run "reject_unsupported_health_check_interval" {
+  command = plan
+
+  variables {
+    health_check_interval_seconds = 20
+  }
+
+  expect_failures = [var.health_check_interval_seconds]
 }

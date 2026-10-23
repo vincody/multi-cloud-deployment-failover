@@ -125,3 +125,17 @@ def test_queued_writer_cannot_bypass_pause(client):
             db.commit()
         assert queued.result(timeout=5).status_code == 503
     assert client.get("/api/issues").json() == []
+
+
+def test_ping_is_idempotent_and_listed(client):
+    body = {"run_id": "run-1", "seq": 3}
+    assert client.post("/api/ping", json=body).status_code == 200
+    assert client.post("/api/ping", json=body).status_code == 200
+    listed = client.get("/api/ping/run-1").json()
+    assert listed["count"] == 1 and listed["pings"][0]["seq"] == 3
+
+
+def test_ping_respects_write_barrier(client):
+    with issues.connect() as db:
+        db.execute("UPDATE app_control SET writes_enabled=FALSE WHERE singleton=TRUE")
+    assert client.post("/api/ping", json={"run_id": "run-2", "seq": 0}).status_code == 503

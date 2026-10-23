@@ -39,13 +39,30 @@ Kiểm tra database và WAL:
 
 Primary có `pg_stat_replication.state=streaming`; standby có WAL receiver streaming và các LSN received/replayed. Chỉ việc hai bên có cùng số issue chưa chứng minh mọi nội dung đều giống nhau; đối chiếu cả dữ liệu và WAL replay. Giữ WAL tối thiểu 128 MB cho demo; không có WAL archive/replication slot, standby ngắt quá lâu có thể cần dựng lại từ base backup.
 
-## Failover có kiểm soát
+## Watcher tự failover
 
 ```powershell
-.venv/Scripts/python.exe scripts/local_replication.py failover
+.venv/Scripts/python.exe scripts/watcher.py --interval 5 --threshold 3
 ```
 
-Script tạm chặn ghi qua ứng dụng, chờ các giao dịch ghi đang chạy kết thúc, lấy WAL sau khi khóa ghi và chờ Azure replay tới vị trí đó. Sau đó dừng database AWS, xác minh container không chạy/không tự restart, promote Azure và kiểm tra khả năng ghi trước khi chuyển proxy. Đây là fencing cho mô phỏng local; khóa ghi chỉ bao phủ các writer của ứng dụng này.
+Watcher chạy ngầm và chỉ gọi `failover` khi **hai kiểm tra độc lập cùng báo AWS lỗi** liên tiếp `threshold` lần: `/health/database` của web AWS và kết nối trực tiếp tới PostgreSQL AWS. Nếu chỉ một bên lỗi thì chỉ ghi log "suspect" và tiếp tục theo dõi. Khi `switchover`/`failback` đang chạy (khóa ghi có chủ đích) watcher tạm dừng và xóa bộ đếm. Sau khi failover xong nó dừng hẳn; nó không failback và không bật lại AWS. Nếu `failover` không hoàn tất (ví dụ không fence được) nó thoát với mã 2 để người vận hành xử lý.
+
+Thời gian phát hiện xấp xỉ `threshold × (interval + thời gian chờ của mỗi lần kiểm tra)`; khi database bị kill, mỗi lần kiểm tra có thể chờ hết timeout kết nối (2 giây web, 3 giây DB). Bản cloud thay kiểm tra thứ hai bằng trạng thái health check Route 53.
+
+## Chuyển sang Azure: `switchover` và `failover`
+
+| Lệnh | Khi nào | Dữ liệu |
+|---|---|---|
+| `switchover` | AWS còn sống, chuyển có kế hoạch | Không mất |
+| `failover` | AWS đã sập | Có thể mất giao dịch chưa kịp replicate |
+
+Cả hai kết thúc bằng cùng bốn bước: fence AWS → promote Azure → kiểm tra ghi được → chuyển proxy. Lệnh chạy lại an toàn nếu bị dừng giữa chừng.
+
+```powershell
+.venv/Scripts/python.exe scripts/local_replication.py switchover
+```
+
+`switchover` tạm chặn ghi qua ứng dụng, chờ các giao dịch ghi đang chạy kết thúc, lấy WAL sau khi khóa ghi và chờ Azure replay tới vị trí đó. Sau đó dừng database AWS, xác minh container không chạy/không tự restart, promote Azure và kiểm tra khả năng ghi trước khi chuyển proxy. Đây là fencing cho mô phỏng local; khóa ghi chỉ bao phủ các writer của ứng dụng này. `failover` bỏ qua bước khóa ghi và chờ replay vì AWS không còn phản hồi, rồi làm các bước còn lại.
 
 Sau đó:
 
@@ -73,19 +90,16 @@ Trạng thái và log thao tác ở `.local-replication/hetinhtoanphanbo/`: `sta
 
 `GET /api/proxy/status` trên cổng 8090 cho biết writer và phase. Đây là chuyển đổi bằng lệnh local, chưa có bộ giám sát tự phát hiện sự cố, DNS cloud hoặc HA cho chính proxy.
 
-Endpoint `/api/database/status` trả vai trò thực tế và khả năng ghi. `/health/database` chỉ trả 200 khi database kết nối được và cho phép ghi, standby trả 503; `/health/ready` cũ vẫn phục vụ demo dataset, không dùng thay endpoint này cho failover có database.
+Endpoint `/api/database/status` trả vai trò thực tế và khả năng ghi. `/health/database` chỉ trả 200 khi database kết nối được và cho phép ghi, standby trả 503; `/health/live` chỉ xác nhận process, không dùng thay endpoint này cho failover có database.
 
 ## Kiểm chứng tự động
 
 ```powershell
 $env:TASKFLOW_DB_TESTS='1'
 .venv/Scripts/python.exe -m pytest -q -p no:cacheprovider
-.venv/Scripts/python.exe scripts/check_local_replication.py
 .venv/Scripts/python.exe scripts/check_local_lifecycle.py
 ```
 
-Script kiểm chứng tạo một project Compose riêng với volume riêng và cổng 55532/55533, thử tạo/sửa/bình luận, kiểm tra standby từ chối ghi, promote sau fencing, ghi/retry trên Azure và chặn khởi động primary cũ. Sau thử nghiệm chỉ dọn container/volume của project kiểm thử; không promote hoặc xóa bộ local bạn đang dùng.
-
-`check_local_lifecycle.py` dùng project riêng, database 55632/55633, web 18080/18081 và proxy 18090; chạy hai vòng chuyển đổi, đối chiếu toàn bộ issue/bình luận/lịch sử, retry và xác minh volume cũ được giữ lại. Các cổng này phải trống.
+`check_local_lifecycle.py` dùng project Compose riêng, database 55632/55633, web 18080/18081 và proxy 18090. Script kiểm tra standby từ chối ghi, promote sau fencing, chặn `setup` lại primary cũ, ghi/retry trên Azure, chạy nhiều vòng chuyển đổi (gồm failback bị dừng ở hai điểm rồi chạy lại, và `failover` sau khi kill database AWS), đối chiếu toàn bộ issue/bình luận/lịch sử và xác minh volume cũ được giữ lại. Sau thử nghiệm chỉ dọn container/volume của project kiểm thử; không promote hoặc xóa bộ local bạn đang dùng. Các cổng này phải trống.
 
 Tài khoản/password trong cấu hình chỉ dùng local, cổng PostgreSQL bind localhost; replication dùng Docker network nội bộ. Cần secret riêng, kết nối được bảo vệ, backup và cơ chế điều phối/fencing phù hợp khi triển khai cloud.

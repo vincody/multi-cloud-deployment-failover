@@ -48,7 +48,7 @@ Chọn **Review + create → Create**, đợi tạo xong rồi xác nhận `dcs2
 
 1. Giữ các bước Resource Group phía trên; theo Portal guide mục 2–5 tạo VM/NSG/key/Static IP và SSH.
 2. Cài K3s cùng version AWS theo Portal mục 6, không join AWS; kiểm tra node Ready.
-3. Theo mục 7 và [hướng dẫn database](GIAI_DOAN_04_K3S_DATABASE.md): namespace, mạng riêng, PVC, AWS primary/schema và Azure base backup/standby.
+3. Theo [mục 7–8 Azure Portal](GIAI_DOAN_04_AZURE_PORTAL.md#7-namespace-mạng-riêng-và-postgresql): namespace, mạng riêng, PVC, AWS primary/schema và Azure base backup/standby.
 4. Tạo Secret/Deployment/Service app, cùng digest; không dùng Docker login host thay imagePullSecret.
 5. Kiểm tra API/UI/role/WAL, tạo dữ liệu AWS và đối chiếu Azure; standby từ chối ghi.
 6. Reboot, xác minh K3s/pods/PVC/streaming; không restart primary cũ sau failover.

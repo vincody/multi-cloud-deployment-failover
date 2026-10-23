@@ -13,15 +13,36 @@ scrape_configs:
     params:
       module: [https_ready]
     static_configs:
-      - targets: ["https://aws-origin.cloudfailover.id.vn/health/ready"]
+      - targets: ["https://aws-origin.cloudfailover.id.vn/health/live"]
         labels:
           target_name: aws-origin
-      - targets: ["https://azure-origin.cloudfailover.id.vn/health/ready"]
+      - targets: ["https://azure-origin.cloudfailover.id.vn/health/live"]
         labels:
           target_name: azure-origin
-      - targets: ["https://app.cloudfailover.id.vn/health/ready"]
+      - targets: ["https://app.cloudfailover.id.vn/health/live"]
         labels:
           target_name: shared-domain
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox:9115
+
+  # Writer probe: only the current primary answers 200, so this series shows which cloud
+  # holds the writer and exactly when it moves during a failover.
+  - job_name: blackbox_writer
+    metrics_path: /probe
+    params:
+      module: [https_ready]
+    static_configs:
+      - targets: ["https://aws-origin.cloudfailover.id.vn/health/database"]
+        labels:
+          target_name: aws-origin
+      - targets: ["https://azure-origin.cloudfailover.id.vn/health/database"]
+        labels:
+          target_name: azure-origin
     relabel_configs:
       - source_labels: [__address__]
         target_label: __param_target

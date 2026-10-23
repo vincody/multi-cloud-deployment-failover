@@ -19,7 +19,7 @@ docker compose -f database/compose.local.yml up -d --wait
 
 Mở http://127.0.0.1:8080/issues.html. Nếu backend cũ đang chạy, khởi động lại để nạp API mới. PostgreSQL vẫn dùng volume local hiện có; tên database/tài khoản `taskflow` được giữ để tránh thay đổi dữ liệu cũ. Kết nối có thể cấu hình bằng `DATABASE_URL`. Mật khẩu Compose chỉ dành cho local và cổng 55432 chỉ bind localhost.
 
-Các bảng mới: `issues`, `comments`, `issue_history`; dùng chung `save_requests` với thao tác có mã loại riêng. Không xóa hoặc chuyển đổi bảng `tasks`/`task_history`; trang `/tasks.html` và dashboard `/` vẫn được giữ. Kết nối, truy vấn, schema SQL và Compose nằm trong [database/](../database/README.md). `initialize()` tạo bảng/index khi chưa có; đây là bootstrap local, chưa phải hệ thống migration production.
+Các bảng mới: `issues`, `comments`, `issue_history`; dùng chung `save_requests` với thao tác có mã loại riêng. Database cũ có thể còn bảng `tasks`/`task_history` từ bản demo trước; ứng dụng không còn dùng nhưng cũng không xóa chúng. Kết nối, truy vấn, schema SQL và Compose nằm trong [database/](../database/README.md). `initialize()` tạo bảng/index khi chưa có; đây là bootstrap local, chưa phải hệ thống migration production.
 
 ## Hành vi cần kiểm tra
 
@@ -42,6 +42,6 @@ $env:TASKFLOW_DB_TESTS='1'
 .venv/Scripts/python.exe -m pytest -q -p no:cacheprovider
 ```
 
-Test PostgreSQL dùng schema riêng, không xóa dữ liệu người dùng. Giai đoạn này chỉ có một database local; chưa có replication/failover. Readiness cũ vẫn kiểm tra dataset dashboard, cần bổ sung database role/read-write khi triển khai đa cloud.
+Test PostgreSQL dùng schema riêng, không xóa dữ liệu người dùng. Giai đoạn này chỉ có một database local; chưa có replication/failover. Khả năng ghi được kiểm tra qua `/health/database`.
 
 Demo đa cloud tiếp theo: tạo issue và bình luận trên AWS → xác minh standby Azure đã đồng bộ → gây sự cố và promote có fencing → tiếp tục bình luận/đóng issue trên Azure → tái đồng bộ AWS trước failback. Lần thử bất ngờ cần đo các giao dịch chưa kịp sao chép, không cam kết mất dữ liệu bằng không.
