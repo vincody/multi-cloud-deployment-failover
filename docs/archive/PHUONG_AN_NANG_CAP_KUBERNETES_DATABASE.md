@@ -40,7 +40,7 @@ Người dùng dự kiến nâng mỗi VM từ 2 GB lên 4 GB RAM. Mỗi VM nên
 
 ## 4. Nghiệp vụ và database
 
-**Đã chốt nghiệp vụ mới: Issues mini, hệ thống ticket hỗ trợ theo kiểu GitHub Issues.** Thay thế lựa chọn quản lý công việc trước đó. Đã có hai web local AWS/Azure, PostgreSQL primary/standby với replication, chế độ chỉ đọc, proxy dùng chung cổng 8090 và quy trình failover/rejoin/failback có kiểm soát. Khi dựng lại standby, volume cũ được giữ nguyên. Kubernetes, triển khai cloud, giám sát tự động và DNS cloud là các bước tiếp theo. Hướng dẫn: [LOCAL_REPLICATION.md](LOCAL_REPLICATION.md).
+**Đã chốt nghiệp vụ mới: Issues mini, hệ thống ticket hỗ trợ theo kiểu GitHub Issues.** Thay thế lựa chọn quản lý công việc trước đó. Đã có hai web local AWS/Azure, PostgreSQL primary/standby với replication, chế độ chỉ đọc, proxy dùng chung cổng 8090 và quy trình failover/rejoin/failback có kiểm soát. Khi dựng lại standby, volume cũ được giữ nguyên. Kubernetes, triển khai cloud, giám sát tự động và DNS cloud là các bước tiếp theo. Hướng dẫn: [LOCAL_REPLICATION.md](../LOCAL_REPLICATION.md).
 
 Schema nghiệp vụ gồm bốn bảng:
 

@@ -118,11 +118,15 @@ Các test database dùng schema riêng. Script lifecycle dựng project Docker r
 ```text
 app/                 FastAPI, giao diện Issues và proxy local
 database/            Kết nối, truy vấn, schema, Compose và script replication
-scripts/             Điều phối và kiểm chứng failover/failback local
-tests/               Kiểm thử API, database và proxy
-docs/                Hướng dẫn local và kế hoạch triển khai
-deploy/terraform/    Hạ tầng AWS/Azure, automation workload, HTTPS và failover
-observability/       Cấu hình Prometheus, Blackbox Exporter và Grafana
+scripts/             Failover/failback local, watcher, probe đo đạc, dữ liệu mẫu
+tests/               Kiểm thử API, database, proxy và watcher
+deploy/terraform/    Hạ tầng AWS/Azure, automation workload, HTTPS, DNS và watcher failover
+observability/       Prometheus, Blackbox Exporter và Grafana (dashboard có sẵn)
+images/              Sơ đồ kiến trúc và icon
+docs/                Hướng dẫn, đo đạc, trade-off, kế hoạch revamp
+  giai-doan/         Triển khai thủ công (thu_cong) và bằng Terraform (tu_dong)
+  course/            Yêu cầu và danh sách đề tài của môn học
+  archive/           Tài liệu thiết kế cũ, giữ để tham khảo
 .github/workflows/   Kiểm thử, build và phát hành image
 ```
 
@@ -132,8 +136,10 @@ observability/       Cấu hình Prometheus, Blackbox Exporter và Grafana
 - Tự động failover local: `scripts/watcher.py` (xem [hướng dẫn replication](docs/LOCAL_REPLICATION.md#watcher-tự-failover))
 - [Đo đạc failover: downtime, RPO, latency, cost proxy](docs/DO_DAC_FAILOVER.md)
 - [Độ phức tạp vận hành và trade-off](docs/TRADE_OFFS.md)
-- [Phương án Kubernetes và database đa cloud](docs/PHUONG_AN_NANG_CAP_KUBERNETES_DATABASE.md)
-- [Các giai đoạn triển khai thủ công](docs/giai-doan/thu_cong/README.md)
+- [Kế hoạch revamp](docs/REVAMP_PLAN.md)
+- [Các giai đoạn triển khai thủ công](docs/giai-doan/thu_cong/README.md) · [bằng Terraform](docs/giai-doan/tu_dong/README.md)
 - [Thông số triển khai cloud](docs/giai-doan/thu_cong/THONG_SO_TRIEN_KHAI.md)
+- [Yêu cầu của môn học](docs/course/REQUIREMENTS.md) · [Danh sách đề tài](docs/course/Distributed_Computing_Systems_Project_List.pdf)
+- [Phương án Kubernetes và database đa cloud (tham khảo)](docs/archive/PHUONG_AN_NANG_CAP_KUBERNETES_DATABASE.md)
 
 Tên người gửi hiện được nhập trực tiếp, chưa có xác thực/phân quyền. Tài khoản và mật khẩu trong Compose chỉ dành cho demo local. Không commit credential, file `.env`, private key, Terraform state hoặc dữ liệu runtime.
