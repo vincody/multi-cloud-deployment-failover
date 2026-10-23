@@ -1,7 +1,7 @@
 # Giai đoạn 1 — Xây dựng và kiểm tra ứng dụng local
 
 **Trạng thái:** Issues và quy trình failover/failback đã kiểm chứng local; cloud chưa nghiệm thu theo kiến trúc mới.
-**Phạm vi:** ứng dụng Issues, PostgreSQL, replication và kiểm thử local. Dashboard/dataset cũ vẫn giữ để tham khảo.
+**Phạm vi:** ứng dụng Issues, PostgreSQL, replication và kiểm thử local.
 
 ## Đọc nhanh trước khi triển khai
 
@@ -111,11 +111,11 @@ Local chứng minh chức năng, chưa chứng minh networking/fencing/storage/D
 | Giao diện Issues | app/static/issues.html, issues.js, issues.css | Danh sách, chi tiết, tìm kiếm và bản nháp |
 | Database | database/ | Kết nối, truy vấn, schema, role và khóa ghi |
 | Replication | database/compose.replication.yml | Hai PostgreSQL 17 với storage riêng |
-| Điều phối | scripts/local_replication.py, local_lifecycle.py | Setup, failover, rejoin, failback local |
+| Điều phối | scripts/local_replication.py | Setup, failover, rejoin, failback local |
 | Proxy | app/local_proxy.py | URL chung, chặn truy cập trong phase đổi primary |
 | Tests | tests/test_issues.py, test_local_proxy.py | Transaction, retry, khóa ghi và chuyển tuyến |
 
-Các bảng issues/comments/issue_history lưu nghiệp vụ, save_requests lưu receipt chống trùng, app_control lưu gate ghi. Bảng demo tasks cũ vẫn giữ.
+Các bảng issues/comments/issue_history lưu nghiệp vụ, save_requests lưu receipt chống trùng, app_control lưu gate ghi.
 
 </details>
 
@@ -145,9 +145,8 @@ Các bảng issues/comments/issue_history lưu nghiệp vụ, save_requests lưu
 | `APP_REGION` | `local-development` | `AWS_REGION` | Azure region đã chọn |
 | `APP_VERSION` | mặc định `v0.1.0` | lấy từ image/CI | giống AWS |
 | `COMMIT_SHA` | tự đọc Git | CI truyền full SHA | cùng SHA AWS |
-| `dataset_sha256` | tính lúc startup | cùng fingerprint | cùng fingerprint |
 
-Local gắn `-dirty` nếu source có thay đổi chưa commit. Trong container, CI truyền SHA vì image không chứa `.git`. Sau failover, version/commit/fingerprint phải giữ nguyên; environment/region phải thay đổi.
+Local gắn `-dirty` nếu source có thay đổi chưa commit. Trong container, CI truyền SHA vì image không chứa `.git`. Sau failover, version/commit phải giữ nguyên; environment/region phải thay đổi.
 
 </details>
 
@@ -168,7 +167,7 @@ Local gắn `-dirty` nếu source có thay đổi chưa commit. Trong container,
 | GET /version | Đối chiếu image | Commit, version và môi trường |
 | GET /api/proxy/status | Cổng 8090 | Writer và phase điều phối local |
 
-/health/ready và /metrics cũ vẫn phục vụ dashboard/dataset. Metric workload /api/devices không đại diện giao dịch Issues.
+GET / chuyển hướng tới /issues.html. /metrics xuất số request/latency HTTP cho Prometheus.
 
 </details>
 

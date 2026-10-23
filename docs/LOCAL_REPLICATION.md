@@ -73,19 +73,16 @@ Trạng thái và log thao tác ở `.local-replication/hetinhtoanphanbo/`: `sta
 
 `GET /api/proxy/status` trên cổng 8090 cho biết writer và phase. Đây là chuyển đổi bằng lệnh local, chưa có bộ giám sát tự phát hiện sự cố, DNS cloud hoặc HA cho chính proxy.
 
-Endpoint `/api/database/status` trả vai trò thực tế và khả năng ghi. `/health/database` chỉ trả 200 khi database kết nối được và cho phép ghi, standby trả 503; `/health/ready` cũ vẫn phục vụ demo dataset, không dùng thay endpoint này cho failover có database.
+Endpoint `/api/database/status` trả vai trò thực tế và khả năng ghi. `/health/database` chỉ trả 200 khi database kết nối được và cho phép ghi, standby trả 503; `/health/live` chỉ xác nhận process, không dùng thay endpoint này cho failover có database.
 
 ## Kiểm chứng tự động
 
 ```powershell
 $env:TASKFLOW_DB_TESTS='1'
 .venv/Scripts/python.exe -m pytest -q -p no:cacheprovider
-.venv/Scripts/python.exe scripts/check_local_replication.py
 .venv/Scripts/python.exe scripts/check_local_lifecycle.py
 ```
 
-Script kiểm chứng tạo một project Compose riêng với volume riêng và cổng 55532/55533, thử tạo/sửa/bình luận, kiểm tra standby từ chối ghi, promote sau fencing, ghi/retry trên Azure và chặn khởi động primary cũ. Sau thử nghiệm chỉ dọn container/volume của project kiểm thử; không promote hoặc xóa bộ local bạn đang dùng.
-
-`check_local_lifecycle.py` dùng project riêng, database 55632/55633, web 18080/18081 và proxy 18090; chạy hai vòng chuyển đổi, đối chiếu toàn bộ issue/bình luận/lịch sử, retry và xác minh volume cũ được giữ lại. Các cổng này phải trống.
+`check_local_lifecycle.py` dùng project Compose riêng, database 55632/55633, web 18080/18081 và proxy 18090. Script kiểm tra standby từ chối ghi, promote sau fencing, chặn `setup` lại primary cũ, ghi/retry trên Azure, chạy hai vòng chuyển đổi, đối chiếu toàn bộ issue/bình luận/lịch sử và xác minh volume cũ được giữ lại. Sau thử nghiệm chỉ dọn container/volume của project kiểm thử; không promote hoặc xóa bộ local bạn đang dùng. Các cổng này phải trống.
 
 Tài khoản/password trong cấu hình chỉ dùng local, cổng PostgreSQL bind localhost; replication dùng Docker network nội bộ. Cần secret riêng, kết nối được bảo vệ, backup và cơ chế điều phối/fencing phù hợp khi triển khai cloud.

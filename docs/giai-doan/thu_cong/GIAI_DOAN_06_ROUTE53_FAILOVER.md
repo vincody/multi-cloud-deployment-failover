@@ -1,6 +1,6 @@
 # Giai đoạn 6 — Fencing, PostgreSQL failover/failback và Route 53
 
-**Đầu vào:** GĐ4–GĐ5 đạt trên hai VM; cùng image digest, schema và streaming, HTTPS/Ingress hợp lệ. **Trạng thái:** hướng dẫn thao tác có kiểm soát, chưa có script điều phối cloud đã nghiệm thu. Không chạy local_lifecycle.py nguyên xi trên VM.
+**Đầu vào:** GĐ4–GĐ5 đạt trên hai VM; cùng image digest, schema và streaming, HTTPS/Ingress hợp lệ. **Trạng thái:** hướng dẫn thao tác có kiểm soát, chưa có script điều phối cloud đã nghiệm thu. Không chạy scripts/local_replication.py nguyên xi trên VM.
 
 ## Đọc nhanh trước khi triển khai
 

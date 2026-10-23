@@ -472,7 +472,7 @@ curl.exe --fail-with-body --resolve "${SharedHost}:443:${AwsIp}" "https://${Shar
 curl.exe --fail-with-body --resolve "${SharedHost}:443:${AzureIp}" "https://${SharedHost}/api/issues"
 ```
 
-Không dùng -k để bỏ kiểm tra TLS. --resolve chỉ thử từng origin, không chứng minh DNS failover. Người dùng mở /issues.html; / vẫn là dashboard cũ nếu chưa cấu hình redirect trang.
+Không dùng -k để bỏ kiểm tra TLS. --resolve chỉ thử từng origin, không chứng minh DNS failover. Người dùng mở /issues.html; / tự chuyển hướng tới trang này.
 
 ### 9.2. Redirect HTTP → HTTPS khi cần
 

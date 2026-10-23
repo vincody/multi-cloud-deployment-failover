@@ -48,7 +48,6 @@
 | DR_CONTROL_REGION, ACCOUNT_ID | us-east-1 và AWS account thật, dùng GĐ6B |
 | AZURE_NODE_ID, DR_CONTROLLER_MODE | SSM mi-ID thật; manual/automatic ghi theo lượt đo, không dùng ID máy người khác |
 | NODE_EXPORTER_IMAGE_DIGEST | Image node-exporter linux/amd64 pin theo GĐ7 |
-| DATASET_SHA256 | Chỉ dùng so dashboard cũ; không thay kiểm chứng dữ liệu Issues |
 
 ## Thứ tự điền và kiểm tra trước khi chạy lệnh
 
@@ -67,7 +66,7 @@ Thay mọi YOUR_DOMAIN, IP, username, image, version và đường dẫn mẫu t
 - T3 dùng CPU credit; ghi chế độ Standard/Unlimited và dự toán theo region. B2s cũng là burstable, cần theo dõi credit khi thử tải.
 - Bv1 có thông báo retirement. Nếu B2s không khả dụng, ghi lỗi và chốt lại size, không tự đổi cấu hình.
 - Managed disk Azure không thể thu nhỏ trực tiếp. Chọn theo image ngay lúc tạo; Azure lớn hơn 30 GiB không buộc AWS phải tăng theo.
-- Không dùng thông số nghiệm thu của lượt chạy cũ. Dataset fingerprint chỉ liên quan dashboard cũ; Issues kiểm chứng dữ liệu PostgreSQL, role và WAL.
+- Không dùng thông số nghiệm thu của lượt chạy cũ. Issues kiểm chứng dữ liệu PostgreSQL, role và WAL.
 
 Nguồn: [AWS CPU credit](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/burstable-performance-instances-unlimited-mode-concepts.html), [Azure Bv1](https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/bv1-series), [Azure disk FAQ](https://learn.microsoft.com/en-us/azure/virtual-machines/faq-for-disks).
 

@@ -53,11 +53,11 @@ Theo mục 9 của cùng guide: tạo /opt/dcs29, namespace issues; chốt GHCR 
 
 ## 6. PostgreSQL, schema và app
 
-Theo [hướng dẫn K3s/database](GIAI_DOAN_04_K3S_DATABASE.md): mạng riêng/PVC/StatefulSet → schema primary → standby Azure → Deployment/Service. Các mẫu manifest đã có ngay trong Console/Portal guide; thay IP/digest theo mạng/disk thực tế trước khi tạo file và apply.
+Theo [AWS Console mục 9](GIAI_DOAN_03_AWS_CONSOLE.md#9-chuẩn-bị-namespace-và-image) và [Azure Portal mục 7–8](GIAI_DOAN_04_AZURE_PORTAL.md#7-namespace-mạng-riêng-và-postgresql): mạng riêng/PVC/StatefulSet → schema primary → standby Azure → Deployment/Service. Các mẫu manifest đã có ngay trong Console/Portal guide; thay IP/digest theo mạng/disk thực tế trước khi tạo file và apply.
 
 ## 7. Kiểm tra origin
 
-Sau DB/app/Ingress: /issues.html, /version, /api/database/status, /api/issues; commit/digest đúng, AWS primary writable. /health/ready dataset cũ không đủ chứng minh DB.
+Sau DB/app/Ingress: /issues.html, /version, /api/database/status, /api/issues; commit/digest đúng, AWS primary writable. /health/live không đủ chứng minh DB.
 
 ## 8. Restart/reboot và tính độc lập
 

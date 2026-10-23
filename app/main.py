@@ -1,29 +1,22 @@
-"""Runtime status dashboard used to demonstrate multi-cloud failover."""
+"""Issues service entry point: runtime identity, health checks and static UI."""
 
 from __future__ import annotations
 
-import hashlib
-import json
-import math
 import os
 import subprocess
-import threading
 import time
-from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Request, Response
-from fastapi.responses import JSONResponse
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
-from app.tasks import router as tasks_router
 from app.issues import router as issues_router
 from database.role import router as database_router
 
 APP_DIR = Path(__file__).resolve().parent
-DATASET_PATH = APP_DIR / "data" / "devices.json"
 STATIC_DIR = APP_DIR / "static"
 STARTED_AT = datetime.now(timezone.utc)
 STARTED_MONOTONIC = time.monotonic()
@@ -61,71 +54,14 @@ COMMIT_SHA = os.getenv("COMMIT_SHA") or _local_commit_sha()
 
 HTTP_REQUESTS = Counter(
     "dcs29_http_requests_total",
-    "Total HTTP requests handled by the dashboard.",
+    "Total HTTP requests handled by the service.",
     ("method", "path", "status_code"),
 )
 HTTP_DURATION = Histogram(
     "dcs29_http_request_duration_seconds",
-    "Time spent serving dashboard HTTP requests.",
+    "Time spent serving HTTP requests.",
     ("method", "path"),
 )
-
-_request_count = 0
-_request_count_lock = threading.Lock()
-_workload_samples: deque[tuple[float, int, float]] = deque(maxlen=10_000)
-_workload_lock = threading.Lock()
-
-
-def _load_devices() -> tuple[list[dict[str, Any]], str]:
-    raw_dataset = DATASET_PATH.read_bytes()
-    devices = json.loads(raw_dataset)
-    return devices, hashlib.sha256(raw_dataset).hexdigest()
-
-
-DEVICES, DATASET_SHA256 = _load_devices()
-
-
-def _increment_request_count() -> int:
-    global _request_count
-    with _request_count_lock:
-        _request_count += 1
-        return _request_count
-
-
-def _current_request_count() -> int:
-    with _request_count_lock:
-        return _request_count
-
-
-def _record_workload(path: str, status_code: int, duration: float) -> None:
-    # The dashboard polls /api/status; counting that traffic would inflate its own chart.
-    if path != "/api/devices":
-        return
-    now = time.monotonic()
-    with _workload_lock:
-        _workload_samples.append((now, status_code, duration))
-        while _workload_samples and _workload_samples[0][0] < now - 60:
-            _workload_samples.popleft()
-
-
-def _workload_summary() -> dict[str, int | float | None]:
-    now = time.monotonic()
-    with _workload_lock:
-        while _workload_samples and _workload_samples[0][0] < now - 60:
-            _workload_samples.popleft()
-        samples = list(_workload_samples)
-
-    count = len(samples)
-    if count == 0:
-        return {"requests": 0, "error_percent": None, "p95_ms": None}
-
-    durations = sorted(duration for _, _, duration in samples)
-    errors = sum(status_code >= 400 for _, status_code, _ in samples)
-    return {
-        "requests": count,
-        "error_percent": round(errors * 100 / count, 1),
-        "p95_ms": round(durations[math.ceil(count * 0.95) - 1] * 1000),
-    }
 
 
 def _status_payload() -> dict[str, Any]:
@@ -137,15 +73,12 @@ def _status_payload() -> dict[str, Any]:
         "commit_sha": COMMIT_SHA,
         "started_at": STARTED_AT.isoformat(),
         "uptime_seconds": round(time.monotonic() - STARTED_MONOTONIC, 3),
-        "request_count": _current_request_count(),
-        "workload_60s": _workload_summary(),
-        "dataset_sha256": DATASET_SHA256,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
 
 app = FastAPI(
-    title="DCS29 Multi-Cloud Service Status",
+    title="DCS29 Multi-Cloud Issues",
     version=APP_VERSION,
     docs_url=None,
     redoc_url=None,
@@ -165,15 +98,11 @@ async def instrument_requests(request: Request, call_next: Any) -> Response:
         duration = time.perf_counter() - started
         HTTP_REQUESTS.labels(request.method, path, "500").inc()
         HTTP_DURATION.labels(request.method, path).observe(duration)
-        _increment_request_count()
-        _record_workload(path, 500, duration)
         raise
 
     duration = time.perf_counter() - started
     HTTP_REQUESTS.labels(request.method, path, str(response.status_code)).inc()
     HTTP_DURATION.labels(request.method, path).observe(duration)
-    _increment_request_count()
-    _record_workload(path, response.status_code, duration)
     response.headers["X-Served-By"] = APP_ENV
     response.headers["X-App-Version"] = APP_VERSION
     if path.startswith(("/api/", "/health/", "/version")):
@@ -186,11 +115,6 @@ async def liveness() -> dict[str, str]:
     return {"status": "alive"}
 
 
-@app.get("/health/ready")
-async def readiness() -> dict[str, str]:
-    return {"status": "ready", "dataset_sha256": DATASET_SHA256}
-
-
 @app.get("/api/status")
 async def service_status() -> dict[str, Any]:
     return _status_payload()
@@ -201,18 +125,13 @@ async def version() -> dict[str, Any]:
     return {
         key: value
         for key, value in _status_payload().items()
-        if key in {"environment", "region", "version", "commit_sha", "dataset_sha256", "timestamp"}
+        if key in {"environment", "region", "version", "commit_sha", "timestamp"}
     }
 
 
-@app.get("/api/devices")
-async def devices() -> dict[str, Any]:
-    return {
-        "environment": APP_ENV,
-        "version": APP_VERSION,
-        "dataset_sha256": DATASET_SHA256,
-        "devices": DEVICES,
-    }
+@app.get("/", include_in_schema=False)
+async def index() -> RedirectResponse:
+    return RedirectResponse("/issues.html")
 
 
 @app.get("/metrics", include_in_schema=False)
@@ -220,7 +139,6 @@ async def metrics() -> Response:
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
-app.include_router(tasks_router)
 app.include_router(issues_router)
 app.include_router(database_router)
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")

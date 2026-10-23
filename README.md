@@ -11,7 +11,7 @@
 - Bản nháp lưu trong trình duyệt, kiểm tra version khi sửa và mã yêu cầu chống ghi trùng khi retry.
 - CI kiểm thử với PostgreSQL, build image Linux AMD64, phát hành GHCR và kéo lại image để kiểm tra runtime.
 
-**Bản Issues với database hiện được kiểm chứng ở môi trường local.** Nhánh [Terraform tự động](docs/giai-doan/tu_dong/TRIEN_KHAI_BANG_TERRAFORM.md) đã có automation K3s, WireGuard, PostgreSQL AWS primary/Azure standby, app và HTTPS/renewal; cần chạy nghiệm thu trên hai VM thật. Đã bổ sung [GĐ6B failover tự động](docs/giai-doan/tu_dong/AUTOMATION_FAILOVER.md) bằng CloudWatch/EventBridge/Step Functions/Lambda và SSM Azure, mặc định tắt; chưa nghiệm thu trên cloud. Giám sát độc lập, rejoin và failback vẫn cần thực hiện theo runbook. Các hướng dẫn cloud cũ dành cho dashboard được giữ để tham khảo.
+**Bản Issues với database hiện được kiểm chứng ở môi trường local.** Nhánh [Terraform tự động](docs/giai-doan/tu_dong/TRIEN_KHAI_BANG_TERRAFORM.md) đã có automation K3s, WireGuard, PostgreSQL AWS primary/Azure standby, app và HTTPS/renewal; cần chạy nghiệm thu trên hai VM thật. Đã bổ sung [GĐ6B failover tự động](docs/giai-doan/tu_dong/AUTOMATION_FAILOVER.md) bằng CloudWatch/EventBridge/Step Functions/Lambda và SSM Azure, mặc định tắt; chưa nghiệm thu trên cloud. Giám sát độc lập, rejoin và failback vẫn cần thực hiện theo runbook. Nhánh [thủ công](docs/giai-doan/thu_cong/README.md) mô tả cùng kiến trúc bằng Console/Portal.
 
 ## Chạy demo local
 
@@ -107,7 +107,7 @@ Các test database dùng schema riêng. Script lifecycle dựng project Docker r
 | `/api/proxy/status` | Writer và phase của proxy, chỉ có trên cổng 8090 |
 | `/version` | Phiên bản và commit ứng dụng |
 
-Dashboard cũ tại `/` vẫn có `/api/devices`, `/metrics`, `/health/live` và `/health/ready`. `/health/ready` kiểm tra dataset dashboard; dùng `/health/database` khi kiểm tra khả năng phục vụ ghi của bản Issues. Metric workload cũ chỉ đo lưu lượng `/api/devices`.
+`/` chuyển hướng tới `/issues.html`. `/health/live` chỉ xác nhận process phản hồi (dùng cho Docker HEALTHCHECK, CI và probe Blackbox); dùng `/health/database` khi cần biết origin có phục vụ ghi được không. `/metrics` xuất số request/latency HTTP cho Prometheus.
 
 ## Cấu trúc và tài liệu
 
@@ -117,7 +117,7 @@ database/            Kết nối, truy vấn, schema, Compose và script replica
 scripts/             Điều phối và kiểm chứng failover/failback local
 tests/               Kiểm thử API, database và proxy
 docs/                Hướng dẫn local và kế hoạch triển khai
-deploy/              Cấu hình triển khai dashboard cloud trước đây
+deploy/terraform/    Hạ tầng AWS/Azure, automation workload, HTTPS và failover
 observability/       Cấu hình Prometheus, Blackbox Exporter và Grafana
 .github/workflows/   Kiểm thử, build và phát hành image
 ```
@@ -126,7 +126,7 @@ observability/       Cấu hình Prometheus, Blackbox Exporter và Grafana
 - [Nghiệp vụ Issues và chế độ một database](docs/LOCAL_ISSUES.md)
 - [Cấu trúc database](database/README.md)
 - [Phương án Kubernetes và database đa cloud](docs/PHUONG_AN_NANG_CAP_KUBERNETES_DATABASE.md)
-- [Các giai đoạn triển khai dashboard cloud trước đây](docs/giai-doan/thu_cong/README.md)
+- [Các giai đoạn triển khai thủ công](docs/giai-doan/thu_cong/README.md)
 - [Thông số triển khai cloud](docs/giai-doan/thu_cong/THONG_SO_TRIEN_KHAI.md)
 
 Tên người gửi hiện được nhập trực tiếp, chưa có xác thực/phân quyền. Tài khoản và mật khẩu trong Compose chỉ dành cho demo local. Không commit credential, file `.env`, private key, Terraform state hoặc dữ liệu runtime.

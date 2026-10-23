@@ -71,8 +71,18 @@ try:
     aws_comment = {"request_id": str(uuid4()), "author": "AWS", "body": "Trước failover"}
     request("POST", path + "/comments", aws_comment, "aws")
     compare_issue(issue["id"])
+    # The standby must refuse every write path before promotion.
+    azure = "http://127.0.0.1:18081"
+    assert httpx.get(azure + "/health/database", trust_env=False).status_code == 503
+    assert httpx.post(azure + "/api/issues", json=body | {"request_id": str(uuid4())}, trust_env=False).status_code == 409
+    assert httpx.post(azure + path + "/comments", json=aws_comment | {"request_id": str(uuid4())}, trust_env=False).status_code == 409
     demo.failover()
     assert request("GET", "/api/database/status", cloud="azure")["writable"]
+    try:
+        demo.setup()
+        raise AssertionError("setup must reject a promoted stack")
+    except RuntimeError:
+        pass
     azure_comment = {"request_id": str(uuid4()), "author": "Azure", "body": "Phát sinh khi AWS dừng"}
     first = request("POST", path + "/comments", azure_comment, "azure")
     assert request("POST", path + "/comments", azure_comment, "azure") == first
@@ -101,7 +111,7 @@ try:
     demo.failover()
     demo.failback()
     compare_issue(issue["id"])
-    print("PASS: one URL, proxy switches, AWS/Azure writes, retry, full data/history preservation, archived volumes, repeat cycle")
+    print("PASS: one URL, standby write rejection, unsafe setup blocked, proxy switches, AWS/Azure writes, retry, full data/history preservation, archived volumes, repeat cycle")
 finally:
     for process in reversed(processes):
         if process.poll() is None:

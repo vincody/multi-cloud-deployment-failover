@@ -59,7 +59,6 @@ Nguồn: [K3s single-node](https://docs.k3s.io/quick-start), [PostgreSQL replica
 
 - [AWS Console: từng bước VPC/SG/key/EC2/EIP/SSH/K3s](GIAI_DOAN_03_AWS_CONSOLE.md)
 - [Azure Portal: từng bước quota/RG/VM/NSG/SSH/K3s](GIAI_DOAN_04_AZURE_PORTAL.md)
-- [GĐ4 bổ sung: database/schema, mẫu Deployment/Service, Ingress HTTP và kiểm tra WAL](GIAI_DOAN_04_K3S_DATABASE.md)
 - [Domain/IAM/DNS-01/Certbot, Ingress TLS và renewal chi tiết](GIAI_DOAN_05_DOMAIN_VA_HTTPS.md)
 - [GĐ6B: tạo CloudWatch Alarm, EventBridge, Step Functions/Lambda, IAM và SSM Azure bằng Console](GIAI_DOAN_06B_FAILOVER_TU_DONG.md)
 - [Prometheus/Grafana, panel, tunnel metrics và pod/scale](GIAI_DOAN_07_OBSERVABILITY.md)

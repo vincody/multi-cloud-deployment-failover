@@ -52,14 +52,14 @@ Chạy test container:
 docker run --detach --rm --name dcs29-phase2-test --publish 18080:8080 --env APP_ENV=local-container --env APP_REGION=local-docker dcs29-app:phase2
 ```
 
-`/health/ready` và `/version` trả HTTP 200; Docker health chuyển `starting` → `healthy`; sau đó container được dừng. Local image ID khác registry digest là bình thường.
+`/health/live` và `/version` trả HTTP 200; Docker health chuyển `starting` → `healthy`; sau đó container được dừng. Local image ID khác registry digest là bình thường.
 
 ### 4.1. Phân biệt smoke test image và kiểm tra database
 
 Sau docker run ở trên, kiểm tra rồi dừng container thử:
 
 ```powershell
-Invoke-RestMethod http://127.0.0.1:18080/health/ready
+Invoke-RestMethod http://127.0.0.1:18080/health/live
 Invoke-RestMethod http://127.0.0.1:18080/version
 Invoke-WebRequest -UseBasicParsing http://127.0.0.1:18080/issues.html
 docker stop dcs29-phase2-test
@@ -168,7 +168,7 @@ Build args:
 
 Chúng trở thành ENV và OCI labels `source`, `version`, `revision`. Mỗi cloud cấu hình APP_ENV (aws/azure), APP_REGION và Secret DATABASE_URL tới DB riêng. Schema phải bootstrap trên primary trước khi clone standby; app không tự tạo schema lúc startup.
 
-Docker HEALTHCHECK gọi `/health/ready` mỗi 30 giây, timeout 3 giây, start period 5 giây, 3 lần lỗi mới unhealthy. Nó kiểm tra dataset bên trong container, không kiểm tra DB. /health/database kiểm tra khả năng ghi và trả 503 khi standby khỏe; GĐ6 phải tách chuyển role DB khỏi chuyển DNS.
+Docker HEALTHCHECK gọi `/health/live` mỗi 30 giây, timeout 3 giây, start period 5 giây, 3 lần lỗi mới unhealthy. Nó chỉ kiểm tra process, không kiểm tra DB. /health/database kiểm tra khả năng ghi và trả 503 khi standby khỏe; GĐ6 phải tách chuyển role DB khỏi chuyển DNS.
 
 </details>
 

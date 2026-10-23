@@ -811,7 +811,7 @@ docker compose --env-file observability/.env -f observability/compose.yaml ps --
 
 **Cập nhật Issues/K3s:** giữ các bước Docker Desktop, Prometheus/Grafana và tạo panel dưới đây. Docker Compose ở chương này chạy trên **laptop monitor**, không trên hai VM app. HTTP liveness, database writer readiness và pod state là ba tín hiệu khác nhau. /health/database Azure standby khỏe trả 503, không dùng nó làm probe sống của Azure.
 
-Trước mục 7.3, sửa ba URL target trong observability/prometheus.yml sang hostname thật với /health/live để đo process/TLS; cấu hình repo cũ còn /health/ready nên phải sửa rõ ràng. Liveness 200 không chứng minh DB/schema/ghi hoạt động; thêm kiểm tra DB/Issues riêng ở 7.11.
+Trước mục 7.3, sửa ba URL target trong observability/prometheus.yml sang hostname thật (repo đã dùng /health/live để đo process/TLS). Liveness 200 không chứng minh DB/schema/ghi hoạt động; thêm kiểm tra DB/Issues riêng ở 7.11.
 
 #### 0. Bản đồ thao tác — đọc trước khi làm
 
