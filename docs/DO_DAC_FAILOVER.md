@@ -29,6 +29,7 @@ Probe mỗi giây gọi `GET /version` và `POST /api/ping` (ghi một dòng và
 | Số liệu | Cách tính |
 |---|---|
 | **Downtime (ghi / đọc)** | Từ lần gọi thành công cuối trước lỗi đến lần thành công đầu tiên sau lỗi (`outages` trong summary). Độ phân giải bằng chu kỳ probe |
+| **Detection time (watcher)** | Từ lúc gây sự cố đến `start` của timeline; xấp xỉ `threshold × (interval + timeout kiểm tra)`. Chạy `check_local_lifecycle.py` in giá trị này (lần đo: 16,7 giây với ngưỡng 3, chu kỳ 0,5 giây, do mỗi kiểm tra chờ timeout kết nối) |
 | **Failover time** | `done` − `start` trong `timeline` (thời gian hệ thống xử lý). Detection time (từ lúc sự cố đến `start`) lấy từ CSV: lỗi đầu tiên − thời điểm gây sự cố |
 | **Tỷ lệ lỗi** | Số tick khác 200 / tổng số tick |
 | **Latency** | p50 và p95 của các lần gọi thành công |

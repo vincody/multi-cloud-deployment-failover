@@ -39,6 +39,16 @@ Kiểm tra database và WAL:
 
 Primary có `pg_stat_replication.state=streaming`; standby có WAL receiver streaming và các LSN received/replayed. Chỉ việc hai bên có cùng số issue chưa chứng minh mọi nội dung đều giống nhau; đối chiếu cả dữ liệu và WAL replay. Giữ WAL tối thiểu 128 MB cho demo; không có WAL archive/replication slot, standby ngắt quá lâu có thể cần dựng lại từ base backup.
 
+## Watcher tự failover
+
+```powershell
+.venv/Scripts/python.exe scripts/watcher.py --interval 5 --threshold 3
+```
+
+Watcher chạy ngầm và chỉ gọi `failover` khi **hai kiểm tra độc lập cùng báo AWS lỗi** liên tiếp `threshold` lần: `/health/database` của web AWS và kết nối trực tiếp tới PostgreSQL AWS. Nếu chỉ một bên lỗi thì chỉ ghi log "suspect" và tiếp tục theo dõi. Khi `switchover`/`failback` đang chạy (khóa ghi có chủ đích) watcher tạm dừng và xóa bộ đếm. Sau khi failover xong nó dừng hẳn; nó không failback và không bật lại AWS. Nếu `failover` không hoàn tất (ví dụ không fence được) nó thoát với mã 2 để người vận hành xử lý.
+
+Thời gian phát hiện xấp xỉ `threshold × (interval + thời gian chờ của mỗi lần kiểm tra)`; khi database bị kill, mỗi lần kiểm tra có thể chờ hết timeout kết nối (2 giây web, 3 giây DB). Bản cloud thay kiểm tra thứ hai bằng trạng thái health check Route 53.
+
 ## Chuyển sang Azure: `switchover` và `failover`
 
 | Lệnh | Khi nào | Dữ liệu |

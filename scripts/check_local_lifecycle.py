@@ -5,6 +5,7 @@ import subprocess
 import sys
 import threading
 import time
+from datetime import datetime, timezone
 from uuid import uuid4
 
 import httpx
@@ -16,6 +17,7 @@ os.environ.update(LOCAL_REPL_PROJECT="dcs29-cycle-" + uuid4().hex[:8], AWS_DB_PO
 from scripts import local_replication as demo
 from database.local_state import read_state
 from scripts import probe_failover as probe
+from scripts import watcher
 
 processes = []
 base = "http://127.0.0.1:18090"
@@ -146,8 +148,17 @@ try:
     thread = threading.Thread(target=run_probe)
     thread.start()
     time.sleep(2)
+    # The watcher decides on its own: it must see both checks fail three times, then fence and promote.
+    outcome = {}
+    monitor = threading.Thread(target=lambda: outcome.update(
+        result=watcher.run(watcher.check_web, watcher.check_db, demo.failover, interval=.5, threshold=3, log=lambda _: None)))
+    monitor.start()
+    killed_at = datetime.now(timezone.utc)
     demo.compose("kill", "database")
-    demo.failover()
+    monitor.join(timeout=120)
+    assert outcome.get("result") == "failed-over", outcome
+    started = datetime.fromisoformat(read_state()["timeline"][0]["at"])
+    print(f"detection time: {(started - killed_at).total_seconds():.1f}s (kill -> failover start)")
     time.sleep(2)
     stop.set()
     thread.join()
@@ -163,7 +174,7 @@ try:
     demo.failback()
     request("GET", path, cloud="aws")
     compare_issue(issue["id"])
-    print("PASS: one URL, standby write rejection, unsafe setup blocked, proxy switches, AWS/Azure writes, retry, full data/history preservation, archived volumes, repeat cycle, resumed failback (two stop points), failover after AWS kill with live probe and timeline")
+    print("PASS: one URL, standby write rejection, unsafe setup blocked, proxy switches, AWS/Azure writes, retry, full data/history preservation, archived volumes, repeat cycle, resumed failback (two stop points), watcher-triggered failover after AWS kill with live probe and timeline")
 finally:
     for process in reversed(processes):
         if process.poll() is None:

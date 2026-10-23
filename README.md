@@ -129,6 +129,7 @@ observability/       Cấu hình Prometheus, Blackbox Exporter và Grafana
 - [Failover, replication và failback local](docs/LOCAL_REPLICATION.md)
 - [Nghiệp vụ Issues và chế độ một database](docs/LOCAL_ISSUES.md)
 - [Cấu trúc database](database/README.md)
+- Tự động failover local: `scripts/watcher.py` (xem [hướng dẫn replication](docs/LOCAL_REPLICATION.md#watcher-tự-failover))
 - [Đo đạc failover: downtime, RPO, latency, cost proxy](docs/DO_DAC_FAILOVER.md)
 - [Phương án Kubernetes và database đa cloud](docs/PHUONG_AN_NANG_CAP_KUBERNETES_DATABASE.md)
 - [Các giai đoạn triển khai thủ công](docs/giai-doan/thu_cong/README.md)

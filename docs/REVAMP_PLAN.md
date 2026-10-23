@@ -86,7 +86,7 @@ Hai chế độ dùng chung 4 bước fence → promote → verify → route:
 - Script probe chạy từ laptop: gọi `/version` và `POST /api/ping` mỗi giây, xuất CSV (detection time, downtime, tỷ lệ lỗi, latency).
 - Bảng cost proxy từ cấu hình Terraform (VM, disk, DNS).
 
-### GĐ C — Watcher
+### GĐ C — Watcher (bản local đã xong, nhánh `revamp`; bản cloud làm cùng GĐ D)
 - Viết watcher dùng chung code với `failover`.
 - Thử local bằng cách dừng container AWS.
 - Thử các ca "không chắc": chỉ một bên lỗi, không fence được, AWS sống lại sau failover.
