@@ -5,6 +5,6 @@
 - [Chi tiết automation HTTPS](AUTOMATION_HTTPS.md): credential, DNS, cấp certificate, Ingress, renewal và retry.
 - [Chi tiết automation WireGuard, PostgreSQL và Issues](AUTOMATION_WIREGUARD_POSTGRESQL_APP.md): trình tự, file/cấu hình, credential, retry, giới hạn và kiểm thử.
 
-Terraform hiện tạo hạ tầng, bootstrap K3s và tự triển khai WireGuard, PostgreSQL AWS primary/Azure standby, schema, Secret, app và HTTP Ingress. HTTPS/renewal được tự cấu hình khi bật `enable_https`. Delegation domain, key DNS Azure, backup và monitoring vẫn cần thực hiện theo hướng dẫn. GĐ6B tự fence AWS/promote Azure khi bật `enable_auto_failover`; rejoin/failback vẫn thủ công.
+Terraform hiện tạo hạ tầng, bootstrap K3s và tự triển khai WireGuard, PostgreSQL AWS primary/Azure standby, schema, Secret, app và HTTP Ingress. HTTPS/renewal được tự cấu hình khi bật `enable_https`. Delegation domain, key DNS Azure, backup và monitoring vẫn cần thực hiện theo hướng dẫn. GĐ6B cài watcher trên VM Azure khi bật `enable_auto_failover`: watcher tự fence AWS/promote Azure, còn rejoin/failback vẫn thủ công.
 
-[Cấu hình Terraform](../../../deploy/terraform/README.md) · [Quay lại lộ trình](../README.md).
+[Cấu hình Terraform](../../../deploy/terraform/README.md) · [Đo đạc failover](../../DO_DAC_FAILOVER.md) · [Trade-off](../../TRADE_OFFS.md) · [Quay lại lộ trình](../README.md).

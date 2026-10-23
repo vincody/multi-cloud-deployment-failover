@@ -1,6 +1,6 @@
 # Giai đoạn 7 — Monitoring và observability độc lập
 
-**Đầu vào:** GĐ5/GĐ6 đã pass với domain của bạn. Trước khi bật stack, thay **ba target URL trong `observability/prometheus.yml`** bằng hostname của bạn theo [bảng thông số](THONG_SO_TRIEN_KHAI.md); file trong repo chỉ là cấu hình của một lượt lab, không phải giá trị mặc định để dùng nguyên.
+**Đầu vào:** GĐ5/GĐ6 đã pass với domain của bạn. Trước khi bật stack, thay **các target URL trong `observability/prometheus.yml`** (ba dòng của job `blackbox_https`, hai dòng của job `blackbox_writer`) bằng hostname của bạn theo [bảng thông số](THONG_SO_TRIEN_KHAI.md); file trong repo chỉ là cấu hình của một lượt lab, không phải giá trị mặc định để dùng nguyên.
 **Mục tiêu:** thu bằng chứng availability/latency từ laptop bên ngoài AWS để monitoring vẫn sống khi EC2 bị dừng.
 
 > **Nếu đã cài watcher:** trước stop/reboot VM, thử lỗi pod riêng hoặc rejoin, tạo `/opt/dcs29/watcher.pause` trên VM Azure (nếu đã cài watcher bằng nhánh Terraform). Khi khởi động lại phải phê duyệt startup guard sau xác nhận writer; không chờ K3s tự bật. Chỉ xóa file pause khi baseline khỏe và đã xóa marker incident cũ nếu có. Nếu không pause, việc nghỉ hoặc thử lỗi app kéo dài có thể bị watcher coi là sự cố và Stop EC2/promote Azure.
@@ -19,7 +19,7 @@ docker compose --env-file observability/.env -f observability/compose.yaml ps --
 
 **Cập nhật Issues/K3s:** giữ các bước Docker Desktop, Prometheus/Grafana và tạo panel dưới đây. Docker Compose ở chương này chạy trên **laptop monitor**, không trên hai VM app. HTTP liveness, database writer readiness và pod state là ba tín hiệu khác nhau. /health/database Azure standby khỏe trả 503, không dùng nó làm probe sống của Azure.
 
-Trước mục 7.3, sửa ba URL target trong observability/prometheus.yml sang hostname thật (repo đã dùng /health/live để đo process/TLS). Liveness 200 không chứng minh DB/schema/ghi hoạt động; thêm kiểm tra DB/Issues riêng ở 7.11.
+Trước mục 7.3, sửa các URL target trong observability/prometheus.yml (ba của `blackbox_https`, hai của `blackbox_writer`) sang hostname thật; `blackbox_https` dùng /health/live để đo process/TLS, `blackbox_writer` dùng /health/database để thấy origin nào đang nhận ghi. Liveness 200 không chứng minh DB/schema/ghi hoạt động; thêm kiểm tra DB/Issues riêng ở 7.11.
 
 ## Đọc nhanh trước khi triển khai
 
@@ -86,7 +86,7 @@ notepad observability/prometheus.yml
 
 Trong `.env`, thay giá trị sau dấu `=` bằng mật khẩu riêng, lưu và đóng. Không thêm dấu nháy hoặc khoảng trắng ở hai đầu. File `.env` đã được `.gitignore`; không commit hoặc gửi lên chat. Nếu đã có `.env`, bỏ qua `Copy-Item` để tránh ghi đè mật khẩu.
 
-Trong `prometheus.yml`, tìm **ba dòng `targets` dưới job `blackbox_https`** và thay URL thành `https://aws-origin.YOUR_DOMAIN/health/live`, `https://azure-origin.YOUR_DOMAIN/health/live`, `https://app.YOUR_DOMAIN/health/live` sau khi thay `YOUR_DOMAIN` bằng domain thật. Giữ nguyên label `target_name` tương ứng. Lưu file, đọc lại ba URL để chắc chắn không còn hostname/IP của người triển khai khác. Chỉ sau bước này mới chạy `docker compose ... up -d` ở 7.3.
+Trong `prometheus.yml`, tìm **ba dòng `targets` dưới job `blackbox_https`** và thay URL thành `https://aws-origin.YOUR_DOMAIN/health/live`, `https://azure-origin.YOUR_DOMAIN/health/live`, `https://app.YOUR_DOMAIN/health/live` sau khi thay `YOUR_DOMAIN` bằng domain thật. Làm tương tự với **hai dòng `targets` dưới job `blackbox_writer`**: `https://aws-origin.YOUR_DOMAIN/health/database` và `https://azure-origin.YOUR_DOMAIN/health/database`. Giữ nguyên label `target_name` tương ứng. Lưu file, đọc lại các URL để chắc chắn không còn hostname/IP của người triển khai khác. Chỉ sau bước này mới chạy `docker compose ... up -d` ở 7.3.
 
 ### 7.3. LAPTOP — bật stack monitoring
 
@@ -111,7 +111,7 @@ Hai cổng chỉ bind `127.0.0.1` của laptop. Không cần mở inbound 3000/9
 ### 7.4. LAPTOP — hiểu ba file cấu hình trước khi xem số liệu
 
 - `observability/blackbox.yml`: GET HTTPS `/health/live`, chỉ chấp nhận HTTP `200`, kiểm tra TLS certificate thật, dùng IPv4, timeout 7 giây. **Không dùng `curl -k` hoặc `insecure_skip_verify`**.
-- `observability/prometheus.yml`: mỗi 10 giây gọi Blackbox `/probe` cho ba URL, timeout scrape 8 giây. Nhãn `target_name` giữ tên dễ đọc. `prometheus` tự scrape chính nó.
+- `observability/prometheus.yml`: mỗi 10 giây gọi Blackbox `/probe` cho ba URL `/health/live` (job `blackbox_https`) và hai URL `/health/database` (job `blackbox_writer`), timeout scrape 8 giây. Ở job `blackbox_writer`, `probe_success=1` chỉ có ở origin đang là writer; standby luôn là 0 và đó là trạng thái đúng. Nhãn `target_name` giữ tên dễ đọc. `prometheus` tự scrape chính nó.
 - `observability/compose.yaml`: retention 7 ngày; Grafana đọc Prometheus qua mạng Docker nội bộ `http://prometheus:9090`, nên trong Grafana **không nhập `localhost:9090`** làm datasource.
 
 Xem log nếu container vừa khởi động xong mà UI chưa lên:
@@ -325,7 +325,7 @@ Grafana cập nhật sau scrape; kiểm tra CPU/RAM và cùng image/DSN. Sau th�
 
 Mục 7.12 bên dưới cung cấp node exporter và collector PostgreSQL qua SSH tunnel, theo dõi disk, CPU/RAM, role, streaming và WAL lag bytes. /api/database/status hiện cho biết role/LSN nhưng không phải endpoint Prometheus; cần exporter/collector để chuyển thành metric, không thêm nó vào scrape_configs rồi mong tự parse JSON.
 
-Ghi CPU credit từ cloud metrics khi tích hợp. Prometheus/Grafana không tự fence/promote PostgreSQL; GĐ6B có controller tùy chọn; Prometheus/Grafana vẫn chỉ quan sát. Hoàn tất GĐ7 khi pod fail/recover/scale và tín hiệu DB được kiểm chứng, không chỉ ba probe HTTP.
+Ghi CPU credit từ cloud metrics khi tích hợp. Prometheus/Grafana không tự fence/promote PostgreSQL; GĐ6B có watcher tùy chọn; Prometheus/Grafana vẫn chỉ quan sát. Hoàn tất GĐ7 khi pod fail/recover/scale và tín hiệu DB được kiểm chứng, không chỉ ba probe HTTP.
 
 ## 7.12. VM và database metrics — cấu hình hoàn chỉnh cho demo
 
@@ -536,7 +536,7 @@ Nguồn kỹ thuật: [Docker Desktop Windows](https://docs.docker.com/desktop/s
 | shared-domain healthy | Người dùng mới có thể tới một origin healthy; không xác định được AWS hay Azure chỉ từ metric này |
 | Khoảng trắng trên biểu đồ | Có thể do laptop/Docker/Prometheus ngừng chạy hoặc mất Internet; không tự coi là downtime website |
 
-Khoảng lấy mẫu 10 giây không thể xác định thời điểm sự kiện chính xác tới từng giây. Route 53 có chu kỳ health check và DNS cache riêng; so sánh các timestamp ở GD8 với sai số lấy mẫu và cache. Ba probe không thay thế được log client hoặc phép đo k6. Monitor trên laptop không phải dịch vụ giám sát 24/7.
+Khoảng lấy mẫu 10 giây không thể xác định thời điểm sự kiện chính xác tới từng giây. Route 53 có chu kỳ health check và DNS cache riêng; so sánh các timestamp ở GD8 với sai số lấy mẫu và cache. Các probe không thay thế được log client hoặc phép đo của `scripts/probe_failover.py`. Monitor trên laptop không phải dịch vụ giám sát 24/7.
 
 </details>
 

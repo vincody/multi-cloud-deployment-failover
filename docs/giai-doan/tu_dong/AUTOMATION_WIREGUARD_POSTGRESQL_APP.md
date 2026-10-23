@@ -94,7 +94,7 @@ Các bước vẫn do người vận hành thực hiện:
 - Chọn region/quota/image, đăng nhập cloud, SSH key, tfvars và xem plan trước apply.
 - Delegate domain, chuẩn bị credential DNS Azure và bật HTTPS automation; certificate/TLS Secret, HTTPS Ingress và renewal tự chạy.
 - Sau HTTPS/writer check, bật Terraform health check rồi DNS failover theo hai lượt.
-- Diễn tập GĐ6A thủ công trước khi bật GĐ6B. Khi `enable_auto_failover=true`, workflow tự fence AWS/promote Azure; planned drain, rejoin, failback và rearm vẫn do người vận hành thực hiện. Không chạy promote tay song song với workflow.
+- Diễn tập GĐ6A thủ công trước khi bật GĐ6B. Khi `enable_auto_failover=true`, watcher trên VM Azure tự fence AWS/promote Azure ([chi tiết](AUTOMATION_FAILOVER.md)); planned drain, rejoin, failback và rearm vẫn do người vận hành thực hiện. Không chạy promote tay song song với watcher.
 - Backup ngoài VM, monitoring Prometheus/Grafana độc lập, thu thập metrics và đo RTO/RPO.
 
 DNS chỉ chọn origin; không promote PostgreSQL hoặc đồng bộ bản nháp chưa gửi. Async replication có thể mất giao dịch đã commit nhưng chưa replay khi primary sập. Request chưa nhận ACK cần tra receipt/request ID trước khi gửi lại.

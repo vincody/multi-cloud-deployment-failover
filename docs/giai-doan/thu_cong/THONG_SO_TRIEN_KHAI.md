@@ -45,7 +45,6 @@
 | KSM_VERSION | Tag kube-state-metrics tương thích K3s/Kubernetes |
 | AWS_HEALTH_CHECK_ID, AZURE_HEALTH_CHECK_ID | ID writer check từng origin ở GĐ6 |
 | ROUTE53_NS_1 … ROUTE53_NS_4 | Bốn NS của public hosted zone vừa tạo, điền tại nhà đăng ký |
-| DR_CONTROL_REGION, ACCOUNT_ID | us-east-1 và AWS account thật, dùng GĐ6B |
 | DR_CONTROLLER_MODE | manual/automatic ghi theo lượt đo |
 | NODE_EXPORTER_IMAGE_DIGEST | Image node-exporter linux/amd64 pin theo GĐ7 |
 

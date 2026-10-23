@@ -13,7 +13,7 @@ Terraform tạo hai VM/K3s, WireGuard, PostgreSQL primary/standby, schema và ap
 | Lượt 4: DNS failover | Trong mục 9, chỉ publish DNS sau khi sẵn sàng runbook fencing/promote/rejoin |
 | Monitoring | [Cài Prometheus/Grafana và pod metrics](#101-cài-monitoring-và-theo-dõi-pods); Terraform chưa làm phần này |
 | Nghiệm thu | [Diễn tập thủ công](#91-gđ6a--failover-rejoin-và-failback-thủ-công), [kiểm thử và đo RTO/RPO](#102-kiểm-thử-và-đo-rtorpo) |
-| Lượt 5: tùy chọn | [Bật failover tự động GĐ6B](#92-gđ6b--failover-tự-động-aws--azure), sau diễn tập GĐ6A, về baseline và có monitoring |
+| Lượt 5: tùy chọn | [Bật failover tự động GĐ6B](#92-gđ6b--failover-tự-động-aws--azure-watcher), sau diễn tập GĐ6A, về baseline và có monitoring |
 | Chuẩn bị và thực hiện demo | [Runbook sau triển khai đến demo](#13-runbook-sau-triển-khai-đến-demo): kiểm tra baseline, tạo dữ liệu, gây lỗi, xác nhận Azure, rejoin/failback và lưu bằng chứng |
 | Vận hành | [Update image, bảo vệ state, dọn lab](#12-cập-nhật-image-bảo-vệ-state-và-dọn-lab); migration/retry/reboot ở cuối file |
 
@@ -349,6 +349,8 @@ Chỉ thực hiện các lệnh chuyển role sau khi baseline và DNS phần 9 
 
 #### 4. Chuyển role database — trước khi thử DNS failover
 
+> **Tương ứng với script local:** 4.1 + 4.2 + 4.3 là `switchover` (AWS còn sống, không mất dữ liệu); khi AWS đã sập thật bỏ 4.1 và làm 4.2 + 4.3, tương ứng `failover` (có thể mất giao dịch chưa kịp replicate). Watcher của nhánh Terraform tự thực hiện đúng chuỗi `failover` này.
+
 **Thứ tự thao tác:** đọc mục này trước để hiểu runbook, nhưng tạo record bằng Terraform ở phần 9 và xác nhận baseline AWS qua các lệnh quan sát bên dưới trước khi thực hiện chuyển role. Các lệnh mục 4 chỉ chạy trong lượt thử chuyển đổi đã chuẩn bị; không promote ngay khi đang tạo health checks.
 
 ##### 4.1. AWS còn truy cập được: khóa ghi và lấy WAL cuối
@@ -668,7 +670,7 @@ Monitoring và phép đo RTO/RPO chưa được Terraform triển khai. Các l�
 
 ### Giai đoạn 7 — Monitoring và observability độc lập
 
-**Đầu vào:** GĐ5/GĐ6 đã pass với domain của bạn. Trước khi bật stack, thay **ba target URL trong `observability/prometheus.yml`** bằng hostname của bạn theo domain/IP ở phần 3; file trong repo chỉ là cấu hình của một lượt lab, không phải giá trị mặc định để dùng nguyên.
+**Đầu vào:** GĐ5/GĐ6 đã pass với domain của bạn. Trước khi bật stack, thay **các target URL trong `observability/prometheus.yml`** (ba dòng của job `blackbox_https`, hai dòng của job `blackbox_writer`) bằng hostname của bạn theo domain/IP ở phần 3; file trong repo chỉ là cấu hình của một lượt lab, không phải giá trị mặc định để dùng nguyên.
 **Mục tiêu:** thu bằng chứng availability/latency từ laptop bên ngoài AWS để monitoring vẫn sống khi EC2 bị dừng.
 
 > **Ghi chú ngay lúc này:** Bạn có thể để **cả EC2 và Azure VM tắt** trong lúc nghỉ. Bộ monitoring ở GD7 chạy trên **laptop Windows**, độc lập với hai VM. Khi hai VM tắt, cả ba probe sẽ báo lỗi; đó là kết quả đúng, không phải cấu hình hỏng. Chỉ bật hai VM ở bước 7.6 trước khi xác nhận hệ thống healthy và thử failover. Route 53 health checks/hosted zone vẫn tồn tại và có thể tiếp tục phát sinh phí dù máy đã tắt. Docker Desktop/Prometheus/Grafana trên laptop chỉ ghi số liệu khi laptop và Docker đang chạy.
@@ -685,7 +687,7 @@ docker compose --env-file observability/.env -f observability/compose.yaml ps --
 
 **Cập nhật Issues/K3s:** giữ các bước Docker Desktop, Prometheus/Grafana và tạo panel dưới đây. Docker Compose ở chương này chạy trên **laptop monitor**, không trên hai VM app. HTTP liveness, database writer readiness và pod state là ba tín hiệu khác nhau. /health/database Azure standby khỏe trả 503, không dùng nó làm probe sống của Azure.
 
-Trước mục 7.3, sửa ba URL target trong observability/prometheus.yml sang hostname thật (repo đã dùng /health/live để đo process/TLS). Liveness 200 không chứng minh DB/schema/ghi hoạt động; thêm kiểm tra DB/Issues riêng ở 7.11.
+Trước mục 7.3, sửa các URL target trong observability/prometheus.yml (ba của `blackbox_https`, hai của `blackbox_writer`) sang hostname thật; `blackbox_https` dùng /health/live để đo process/TLS, `blackbox_writer` dùng /health/database để thấy origin nào đang nhận ghi. Liveness 200 không chứng minh DB/schema/ghi hoạt động; thêm kiểm tra DB/Issues riêng ở 7.11.
 
 #### 0. Bản đồ thao tác — đọc trước khi làm
 
@@ -738,7 +740,7 @@ notepad observability/prometheus.yml
 
 Trong `.env`, thay giá trị sau dấu `=` bằng mật khẩu riêng, lưu và đóng. Không thêm dấu nháy hoặc khoảng trắng ở hai đầu. File `.env` đã được `.gitignore`; không commit hoặc gửi lên chat. Nếu đã có `.env`, bỏ qua `Copy-Item` để tránh ghi đè mật khẩu.
 
-Trong `prometheus.yml`, tìm **ba dòng `targets` dưới job `blackbox_https`** và thay URL thành `https://aws-origin.YOUR_DOMAIN/health/live`, `https://azure-origin.YOUR_DOMAIN/health/live`, `https://app.YOUR_DOMAIN/health/live` sau khi thay `YOUR_DOMAIN` bằng domain thật. Giữ nguyên label `target_name` tương ứng. Lưu file, đọc lại ba URL để chắc chắn không còn hostname/IP của người triển khai khác. Chỉ sau bước này mới chạy `docker compose ... up -d` ở 7.3.
+Trong `prometheus.yml`, tìm **ba dòng `targets` dưới job `blackbox_https`** và thay URL thành `https://aws-origin.YOUR_DOMAIN/health/live`, `https://azure-origin.YOUR_DOMAIN/health/live`, `https://app.YOUR_DOMAIN/health/live` sau khi thay `YOUR_DOMAIN` bằng domain thật. Làm tương tự với **hai dòng `targets` dưới job `blackbox_writer`**: `https://aws-origin.YOUR_DOMAIN/health/database` và `https://azure-origin.YOUR_DOMAIN/health/database`. Giữ nguyên label `target_name` tương ứng. Lưu file, đọc lại các URL để chắc chắn không còn hostname/IP của người triển khai khác. Chỉ sau bước này mới chạy `docker compose ... up -d` ở 7.3.
 
 ##### 7.3. LAPTOP — bật stack monitoring
 
@@ -763,7 +765,7 @@ Hai cổng chỉ bind `127.0.0.1` của laptop. Không cần mở inbound 3000/9
 ##### 7.4. LAPTOP — hiểu ba file cấu hình trước khi xem số liệu
 
 - `observability/blackbox.yml`: GET HTTPS `/health/live`, chỉ chấp nhận HTTP `200`, kiểm tra TLS certificate thật, dùng IPv4, timeout 7 giây. **Không dùng `curl -k` hoặc `insecure_skip_verify`**.
-- `observability/prometheus.yml`: mỗi 10 giây gọi Blackbox `/probe` cho ba URL, timeout scrape 8 giây. Nhãn `target_name` giữ tên dễ đọc. `prometheus` tự scrape chính nó.
+- `observability/prometheus.yml`: mỗi 10 giây gọi Blackbox `/probe` cho ba URL `/health/live` (job `blackbox_https`) và hai URL `/health/database` (job `blackbox_writer`), timeout scrape 8 giây. Ở job `blackbox_writer`, `probe_success=1` chỉ có ở origin đang là writer; standby luôn là 0 và đó là trạng thái đúng. Nhãn `target_name` giữ tên dễ đọc. `prometheus` tự scrape chính nó.
 - `observability/compose.yaml`: retention 7 ngày; Grafana đọc Prometheus qua mạng Docker nội bộ `http://prometheus:9090`, nên trong Grafana **không nhập `localhost:9090`** làm datasource.
 
 Xem log nếu container vừa khởi động xong mà UI chưa lên:
@@ -876,7 +878,7 @@ Nếu muốn quan sát một vòng cloud failover, thực hiện đủ fencing/W
 | shared-domain healthy | Người dùng mới có thể tới một origin healthy; không xác định được AWS hay Azure chỉ từ metric này |
 | Khoảng trắng trên biểu đồ | Có thể do laptop/Docker/Prometheus ngừng chạy hoặc mất Internet; không tự coi là downtime website |
 
-Khoảng lấy mẫu 10 giây không thể xác định thời điểm sự kiện chính xác tới từng giây. Route 53 có chu kỳ health check và DNS cache riêng; so sánh các timestamp ở GD8 với sai số lấy mẫu và cache. Ba probe không thay thế được log client hoặc phép đo k6. Monitor trên laptop không phải dịch vụ giám sát 24/7.
+Khoảng lấy mẫu 10 giây không thể xác định thời điểm sự kiện chính xác tới từng giây. Route 53 có chu kỳ health check và DNS cache riêng; so sánh các timestamp ở GD8 với sai số lấy mẫu và cache. Các probe không thay thế được log client hoặc phép đo của `scripts/probe_failover.py`. Monitor trên laptop không phải dịch vụ giám sát 24/7.
 
 
 #### Khi gặp lỗi
@@ -1005,7 +1007,7 @@ Grafana cập nhật sau scrape; kiểm tra CPU/RAM và cùng image/DSN. Sau th�
 
 Tiếp theo thêm node exporter/collector PostgreSQL qua đường quản trị bảo vệ, theo dõi disk, CPU/RAM, role, sender/receiver và WAL lag. /api/database/status hiện cho biết role/LSN nhưng không phải endpoint Prometheus; cần exporter/collector để chuyển thành metric, không thêm nó vào scrape_configs rồi mong tự parse JSON.
 
-Ghi CPU credit từ cloud metrics khi tích hợp. Prometheus/Grafana không tự fence/promote PostgreSQL; tự động hóa cloud cần điều phối GĐ6. Hoàn tất GĐ7 khi pod fail/recover/scale và tín hiệu DB được kiểm chứng, không chỉ ba probe HTTP.
+Ghi CPU credit từ cloud metrics khi tích hợp. Prometheus/Grafana không tự fence/promote PostgreSQL; việc đó do các lệnh GĐ6 hoặc watcher GĐ6B làm. Hoàn tất GĐ7 khi pod fail/recover/scale và tín hiệu DB được kiểm chứng, không chỉ ba probe HTTP.
 
 #### Điều kiện hoàn thành GD7
 
@@ -1039,7 +1041,7 @@ Nguồn kỹ thuật: [Docker Desktop Windows](https://docs.docker.com/desktop/s
 - Hai origin và shared HTTPS pass.
 - Writer check AWS healthy, Azure standby check unhealthy đúng role; process/TLS probe hai origin healthy.
 - Monitoring nằm ngoài AWS.
-- Máy k6/probe không sleep, clock đồng bộ.
+- Máy chạy probe (laptop) không sleep, clock đồng bộ.
 - Budget và cleanup owner được xác nhận.
 - Run manifest ghi commit, digest, TTL, health interval/threshold, replica, client DNS mode và tải.
 
@@ -1076,7 +1078,7 @@ Ghi IssueId, request_id, version, response và UTC. Retry cùng thao tác dùng 
 
 ##### 2.3. Tải và script cũ
 
-Script tests/load/failover.js hiện gọi /api/devices, chỉ kiểm chứng workload dashboard/read-only. Có thể giữ phép đo HTTP 10 request/giây trong 10 phút để tham khảo, nhưng không lấy đó làm bằng chứng replication giao dịch Issues.
+Dùng `scripts/probe_failover.py`: mỗi tick có một lần ghi (`POST /api/ping`) có số thứ tự tăng dần, đi qua cùng khóa ghi với Issues. Sau lượt đo, script hỏi writer mới những `seq` nào đã ACK mà không còn, đó là số ghi bị mất (RPO đo được). Chạy `python scripts/seed_demo.py --url <URL chung>` trước để demo có sẵn dữ liệu. Phép đo này không thay vòng nghiệp vụ Issues ở 2.2.
 
 Kịch bản tải Issues phải bổ sung request_id riêng, version phù hợp, lưu ACK/receipt và đối chiếu dữ liệu; chưa có script này trong repo. Nếu không viết load script, vẫn làm đủ vòng nghiệp vụ/role/WAL phía trên và ghi phạm vi phép đo. Khi tăng tải theo dõi dropped_iterations, CPU credit và RAM 4 GiB.
 
@@ -1084,7 +1086,7 @@ Kịch bản tải Issues phải bổ sung request_id riêng, version phù hợp
 
 ##### Client mặc định
 
-Giữ DNS/connection settings k6 mặc định, ghi rõ k6 version và resolver. Kết quả phản ánh client đó, không đại diện mọi browser.
+Giữ DNS/connection settings mặc định của client probe (httpx trong `probe_failover.py`, `trust_env=False` nên không đi qua proxy hệ thống), ghi rõ phiên bản Python/httpx và resolver. Kết quả phản ánh client đó, không đại diện mọi browser.
 
 ##### DNS experiment
 
@@ -1119,7 +1121,7 @@ F2 là bằng chứng chính; F5 không thay thế F2. Mỗi scenario tối thi�
 1. Tạo run ID, thư mục output và manifest.
 2. Xác nhận version/digest/role/WAL và dữ liệu Issues hai origin.
 3. Xác nhận writer checks đúng role, process probes và Grafana có dữ liệu.
-4. Bắt đầu Prometheus/Grafana, probe CSV và k6.
+4. Bắt đầu Prometheus/Grafana và `scripts/probe_failover.py` (ra `probe.csv` và `probe.summary.json`).
 5. Chạy baseline đủ 3 phút.
 6. Ghi UTC gửi lệnh stop EC2 (`t_action`).
 7. Ghi external origin down (`t0`).
@@ -1156,7 +1158,7 @@ Mỗi run lưu:
 - `manifest.yaml`: scenario/config/digest/TTL.
 - `incident.csv`: event và UTC.
 - `probe.csv`.
-- `k6.json` hoặc summary.
+- `probe.summary.json` (downtime, lỗi, p95, ghi bị mất).
 - Prometheus/Grafana export.
 - AWS/Azure/Route 53 snapshots.
 - `analysis.md` nêu kết quả và anomaly.
@@ -1178,7 +1180,7 @@ Kết luận cần trả lời:
 
 #### 10. Lỗi/threats to validity
 
-- DNS/OS/browser/k6 cache.
+- DNS/OS/browser cache.
 - HTTP keep-alive.
 - Clock lệch.
 - Chỉ chạy một lượt.
@@ -1198,7 +1200,7 @@ Export evidence trước. Dừng/xóa đúng resources theo inventory: EC2, EBS 
 #### 12. Checklist nghiệm thu
 
 - [ ] Có B0, B1, F2, F3; F2 chạy ít nhất 3 lượt.
-- [ ] Probe/k6/monitor chạy ngoài AWS.
+- [ ] Probe/monitor chạy ngoài AWS.
 - [ ] Timeline đủ `t_action/t0/t_detect/t_first_B/t_stable`.
 - [ ] Có error rate/downtime/latency, RTO ghi và RPO thực tế.
 - [ ] Có issue/comments/history/receipt trước-sau, không hai writer.
@@ -1259,7 +1261,7 @@ Nếu mới xong lượt 1, hệ thống chỉ có HTTP trên hai IP; chưa sẵ
 1. Kiểm tra AWS primary/writable và Azure standby/streaming theo mục 7.1.
 2. Làm mục 8.1–8.4: delegate domain, chuẩn bị quyền DNS Azure, bật HTTPS và kiểm tra certificate/redirect.
 3. Làm mục 9: bật health checks trước, xác nhận AWS Healthy/Azure Unhealthy, rồi bật DNS failover bằng lượt apply riêng.
-4. Làm mục 10.1: sửa ba URL probe sang domain thật và `/health/live`, bật monitoring trên laptop, tạo dashboard. Nếu hai VM đang chạy sau apply thì **bỏ qua bước thử khi VM tắt và bước Start VM**; không stop/start chỉ để cài monitoring.
+4. Làm mục 10.1: sửa các URL probe (ba `/health/live`, hai `/health/database`) sang domain thật, bật monitoring trên laptop, tạo dashboard. Nếu hai VM đang chạy sau apply thì **bỏ qua bước thử khi VM tắt và bước Start VM**; không stop/start chỉ để cài monitoring.
 5. Diễn tập thủ công đầy đủ mục 13 này trước. Chỉ khi đã failback và trở lại baseline mới cân nhắc bật GĐ6B bằng mục 9.2. Đây là lựa chọn thêm; demo thủ công không cần lượt apply GĐ6B.
 
 **Kết quả cần có:** HTTPS hai origin và shared domain hoạt động; cùng commit ứng dụng; một writer AWS và một standby Azure; Grafana có dữ liệu probe. Apply thành công một lượt chưa thay thế các kiểm tra trên.
@@ -1375,6 +1377,8 @@ Không gây lỗi khi dữ liệu demo chưa đến Azure. Có thể gõ thêm m
 
 ### 13.5. LAPTOP — chạy probe ghi CSV trong cửa sổ riêng
 
+> **Khuyến nghị:** dùng `scripts/probe_failover.py` thay cho script PowerShell dưới đây. Nó mỗi giây gọi `GET /version` và `POST /api/ping`, ghi `probe.csv`, và khi kết thúc tự tính downtime đọc/ghi, tỷ lệ lỗi, p50/p95 và số lần ghi đã ACK nhưng không còn trên writer mới (xem [đo đạc failover](../../DO_DAC_FAILOVER.md)). Script PowerShell chỉ đọc `/version` và giữ lại cho máy không có Python.
+
 Mở **PowerShell thứ hai**, điền hai giá trị bằng `$SharedUrl` và `$EvidenceDir` từ phiên điều khiển. Chạy trước khi gây lỗi, dừng bằng Ctrl+C sau khi failback hoàn tất:
 
 ```powershell
@@ -1407,7 +1411,7 @@ while ($true) {
 }
 ```
 
-Dự kiến ban đầu các dòng status 200/environment aws. Mỗi vòng gồm thời gian request **cộng** một giây nghỉ, nên khi timeout không phải mẫu đúng mỗi giây. Probe `/version` đo tuyến và ứng dụng; RTO ghi phải lấy từ giao dịch ghi thành công ở bước 13.7. Đây không phải script tải Issues/k6 và không đo toàn bộ RPO; phép đo nâng cao làm theo mục 10.2.
+Dự kiến ban đầu các dòng status 200/environment aws. Mỗi vòng gồm thời gian request **cộng** một giây nghỉ, nên khi timeout không phải mẫu đúng mỗi giây. Probe `/version` đo tuyến và ứng dụng; RTO ghi phải lấy từ giao dịch ghi thành công ở bước 13.7. Đây không phải script tải Issues và không đo toàn bộ RPO; phép đo nâng cao làm theo mục 10.2.
 
 ### 13.6. Gây sự cố — chọn đúng một chế độ
 
@@ -1680,6 +1684,6 @@ Không tự đăng ký domain/đổi NS tại registrar, tạo secret access key
 
 WireGuard, PostgreSQL/PVC, schema, standby, Secret/app và HTTP Ingress đã được triển khai. TLS/renewal đã có automation opt-in. Failover AWS → Azure đã có opt-in ở mục 9.2. Các phần có thể bổ sung tiếp là backup ngoài VM, monitoring, rejoin và failback có kiểm chứng fencing; những phần này vẫn chưa tự động hóa.
 
-Terraform có thể quản lý thêm tài nguyên và triển khai công cụ điều phối. Quy trình failover/failback database lúc sự cố nên do script/controller riêng xử lý với fencing và kiểm tra trạng thái; không coi một lần `terraform apply` là thao tác promote an toàn.
+Terraform có thể quản lý thêm tài nguyên và triển khai công cụ điều phối. Quy trình failover/failback database lúc sự cố nên do script hoặc watcher riêng xử lý với fencing và kiểm tra trạng thái; không coi một lần `terraform apply` là thao tác promote an toàn.
 
 [Quay lại nhánh tự động](README.md) · [Lộ trình chung](../README.md).

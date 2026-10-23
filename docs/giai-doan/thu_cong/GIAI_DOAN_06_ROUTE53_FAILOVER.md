@@ -109,6 +109,8 @@ Health check HTTPS của Route 53 không thay kiểm tra certificate như browse
 
 ## 4. Chuyển role database — trước khi thử DNS failover
 
+> **Tương ứng với script local:** 4.1 + 4.2 + 4.3 là `switchover` (AWS còn sống, không mất dữ liệu); khi AWS đã sập thật bỏ 4.1 và làm 4.2 + 4.3, tương ứng `failover` (có thể mất giao dịch chưa kịp replicate). Watcher của nhánh Terraform tự thực hiện đúng chuỗi `failover` này.
+
 **Thứ tự thao tác:** đọc mục này trước để hiểu runbook, nhưng tạo record ở mục 5 và xác nhận baseline AWS ở mục 6 trước khi thực hiện chuyển role. Các lệnh mục 4 chỉ chạy trong lượt thử chuyển đổi đã chuẩn bị; không promote ngay khi đang tạo health checks.
 
 ### 4.1. AWS còn truy cập được: khóa ghi và lấy WAL cuối
@@ -217,7 +219,7 @@ Khi cả hai writer check unhealthy, Route 53 có thể vẫn trả record theo 
 
 Giữ cùng URL HTTPS /issues.html, tạo/sửa/bình luận/đóng issue trên Azure. Ghi ID/version/request_id, nội dung và lịch sử. Retry không trùng; bản nháp chưa gửi vẫn ở cùng localStorage và không phải giao dịch DB đã commit.
 
-Giữ AWS cũ bị fence. Không Start EC2 với PostgreSQL primary cũ tự khởi động; trước khi bật lại phải có cơ chế chặn workload DB cũ và endpoint writer. Startup guard và các bước rejoin chi tiết ở mục 8.1–8.4 bên dưới kiểm soát lần khởi động lại; GĐ6B có hướng dẫn controller tự động AWS → Azure, nhưng rejoin/failback vẫn làm theo runbook này.
+Giữ AWS cũ bị fence. Không Start EC2 với PostgreSQL primary cũ tự khởi động; trước khi bật lại phải có cơ chế chặn workload DB cũ và endpoint writer. Startup guard và các bước rejoin chi tiết ở mục 8.1–8.4 bên dưới kiểm soát lần khởi động lại; nhánh Terraform có watcher tự động AWS → Azure (xem [failover tự động](../tu_dong/AUTOMATION_FAILOVER.md)), nhưng rejoin/failback vẫn làm theo runbook này.
 
 ## 8. Rejoin AWS và failback có kiểm soát
 

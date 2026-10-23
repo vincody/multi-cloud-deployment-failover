@@ -44,11 +44,13 @@ python -m venv .venv
 Mở http://127.0.0.1:8090/issues.html. Đối chiếu AWS tại 8080 và Azure tại 8081. Nếu cổng đã có backend, xác minh PID rồi dừng đúng tiến trình trước khi start-web, không chạy thêm một bản.
 
 4. Tạo issue/bình luận trên AWS; xác nhận standby có cùng dữ liệu.
-5. Chuyển sang Azure, giữ URL 8090 và tạo thêm dữ liệu:
+5. Chuyển có kế hoạch sang Azure (không mất dữ liệu), giữ URL 8090 và tạo thêm dữ liệu:
 
 ```powershell
-.venv/Scripts/python.exe scripts/local_replication.py failover
+.venv/Scripts/python.exe scripts/local_replication.py switchover
 ```
+
+   Khi AWS đã sập thật dùng `failover` (fence rồi promote ngay, có thể mất giao dịch chưa kịp replicate). `scripts/watcher.py` làm việc đó tự động sau khi hai kiểm tra độc lập cùng báo AWS sập; xem [replication local](../../LOCAL_REPLICATION.md).
 
 6. Tái đồng bộ AWS, kiểm tra rồi failback:
 
@@ -62,9 +64,12 @@ Mở http://127.0.0.1:8090/issues.html. Đối chiếu AWS tại 8080 và Azure 
 
 ```powershell
 $env:TASKFLOW_DB_TESTS='1'
-.venv/Scripts/python.exe -m pytest -q -p no:cacheprovider
+.venv/Scripts/python.exe -m pytest -q
 .venv/Scripts/python.exe scripts/check_local_lifecycle.py
 ```
+
+   `check_local_lifecycle.py` mất khoảng 3 phút: nhiều vòng switchover/failback, failback bị dừng giữa chừng rồi chạy lại, và watcher tự failover sau khi kill database AWS trong lúc probe đang chạy.
+8. Đo một lượt failover (tùy chọn): xem [đo đạc failover](../../DO_DAC_FAILOVER.md).
 
 Không dùng Compose một database hoặc restart primary cũ sau failover. Theo [hướng dẫn local đầy đủ](../../LOCAL_REPLICATION.md) để xem trạng thái, log và các volume giữ lại.
 
@@ -75,7 +80,7 @@ Không dùng Compose một database hoặc restart primary cũ sau failover. The
 - Bình luận phát sinh trên Azure còn nguyên sau failback; retry không tạo trùng.
 - Version cũ khi sửa trả 409; bản nháp chưa gửi vẫn còn cùng origin.
 - Kết thúc vòng: AWS primary, Azure standby streaming, dữ liệu/volume cũ được giữ.
-- 15 tests và hai vòng lifecycle đã đạt trong lượt kiểm chứng local; chạy lại khi code/cấu hình liên quan đổi.
+- Bộ test và bài lifecycle (nhiều vòng, failback bị dừng giữa chừng, watcher tự failover) đã đạt ở lượt kiểm chứng local gần nhất; chạy lại khi code/cấu hình liên quan đổi.
 
 ## 10. Bằng chứng cần lưu
 
@@ -111,11 +116,13 @@ Local chứng minh chức năng, chưa chứng minh networking/fencing/storage/D
 | Giao diện Issues | app/static/issues.html, issues.js, issues.css | Danh sách, chi tiết, tìm kiếm và bản nháp |
 | Database | database/ | Kết nối, truy vấn, schema, role và khóa ghi |
 | Replication | database/compose.replication.yml | Hai PostgreSQL 17 với storage riêng |
-| Điều phối | scripts/local_replication.py | Setup, failover, rejoin, failback local |
+| Điều phối | scripts/local_replication.py | Setup, switchover, failover, rejoin, failback local; ghi timeline từng bước vào state.json |
+| Watcher | scripts/watcher.py, watcher_core.py | Tự failover khi probe web và kết nối database AWS cùng báo lỗi N lần |
+| Đo đạc và demo | scripts/probe_failover.py, seed_demo.py | Probe đọc/ghi ra CSV, tính downtime và số ghi bị mất; nạp dữ liệu mẫu |
 | Proxy | app/local_proxy.py | URL chung, chặn truy cập trong phase đổi primary |
-| Tests | tests/test_issues.py, test_local_proxy.py | Transaction, retry, khóa ghi và chuyển tuyến |
+| Tests | tests/test_issues.py, test_local_proxy.py, test_watcher.py | Transaction, retry, khóa ghi, chuyển tuyến và quyết định của watcher |
 
-Các bảng issues/comments/issue_history lưu nghiệp vụ, save_requests lưu receipt chống trùng, app_control lưu gate ghi.
+Các bảng issues/comments/issue_history lưu nghiệp vụ, save_requests lưu receipt chống trùng, app_control lưu gate ghi, probe_pings lưu các lần ghi nhẹ của probe đo đạc.
 
 </details>
 
@@ -161,6 +168,7 @@ Local gắn `-dirty` nếu source có thay đổi chưa commit. Trong container,
 | GET/POST /api/issues | Danh sách/tạo | Dữ liệu PostgreSQL |
 | GET/PUT /api/issues/{id} | Chi tiết/sửa | Version chống ghi đè |
 | POST /api/issues/{id}/comments | Bình luận | Receipt chống trùng khi retry |
+| POST /api/ping, GET /api/ping/{run_id} | Probe đo đạc | Ghi một dòng có số thứ tự qua cùng khóa ghi; đọc lại để tìm ghi bị mất |
 | GET /api/database/status | Chẩn đoán | Kết nối, role, writable và WAL |
 | GET /health/database | Writer readiness | 200 khi cho ghi, 503 khi standby/paused/offline |
 | GET /health/live | Liveness | Process phản hồi |
