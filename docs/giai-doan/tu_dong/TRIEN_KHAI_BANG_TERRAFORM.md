@@ -936,6 +936,8 @@ Hai DNS origin phải trả đúng IP trên; ba lệnh readiness phải thành c
 
 ##### 7.8. LAPTOP / GRAFANA — tạo dashboard theo từng panel
 
+> Repo đã có sẵn dashboard `DCS29 - Failover` (provisioning trong `observability/grafana/dashboards/`): panel Writer cho thấy origin nào nhận ghi, hai panel còn lại là health và thời gian phản hồi. Các bước tạo panel thủ công bên dưới chỉ cần khi muốn thêm panel riêng.
+
 1. Grafana → **Dashboards → New → New dashboard → Add visualization** → chọn datasource **Prometheus**.
 2. Tạo từng panel từ bảng dưới. Trong editor panel, chọn loại hiển thị; nhập PromQL ở ô query; đổi **Title**; **Apply/Back to dashboard**; lặp lại. Với panel có ba series, đặt legend `{{target_name}}` để phân biệt AWS/Azure/domain. Chọn time range `Last 30 minutes` và refresh `10s` ở góc dashboard. UI có thể thay đổi tên nút giữa các phiên bản.
 

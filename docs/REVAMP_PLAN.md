@@ -82,7 +82,7 @@ Hai chế độ dùng chung 4 bước fence → promote → verify → route:
 - Ghi timestamp từng bước vào `state.json`: khóa ghi, replay xong, fence, promote, writer xác nhận.
 - Ghi LSN cuối Azure nhận so với LSN cuối AWS để tính RPO thực tế.
 - Thêm endpoint ghi nhẹ `POST /api/ping` (ghi một dòng có timestamp và nơi phục vụ) để probe ghi mỗi giây mà không làm bẩn danh sách issue. Phải đi qua cùng cơ chế khóa ghi/`guard_write` như API Issues để bị chặn đúng lúc standby hoặc đang chuyển đổi.
-- Chuẩn bị bộ dữ liệu mẫu để demo có sẵn nội dung.
+- Bộ dữ liệu mẫu cho demo: `scripts/seed_demo.py` (đã xong, chạy lại không tạo trùng).
 - Script probe chạy từ laptop: gọi `/version` và `POST /api/ping` mỗi giây, xuất CSV (detection time, downtime, tỷ lệ lỗi, latency).
 - Bảng cost proxy từ cấu hình Terraform (VM, disk, DNS).
 
@@ -97,7 +97,7 @@ Hai chế độ dùng chung 4 bước fence → promote → verify → route:
 - Làm trong **một commit riêng** để có thể khôi phục.
 
 ### GĐ E — Giám sát và tài liệu
-- Prometheus: thêm probe `/health/database` cho cả hai origin để thấy writer đổi từ AWS sang Azure.
+- Prometheus: job `blackbox_writer` probe `/health/database` của cả hai origin, kèm dashboard Grafana `DCS29 - Failover` được provisioning sẵn (đã xong; chưa chạy trên stack Grafana thật, cấu hình Prometheus đã qua `promtool check config`).
 - Cập nhật GĐ6 và GĐ8 theo flow mới; rút gọn `TRIEN_KHAI_BANG_TERRAFORM.md` (hiện 1.809 dòng).
 - Viết mục trade-off: độ phức tạp vận hành, RPO > 0, split-brain, watcher là điểm lỗi duy nhất, replication không phải backup.
 

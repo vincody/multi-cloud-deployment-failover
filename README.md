@@ -27,6 +27,8 @@ python -m venv .venv
 
 Mở **http://127.0.0.1:8090/issues.html** và giữ URL này trong toàn bộ demo.
 
+Muốn có sẵn nội dung để demo: `.venv/Scripts/python.exe scripts/seed_demo.py` (chạy lại không tạo trùng).
+
 | Thành phần | Địa chỉ local | Vai trò ban đầu |
 |---|---|---|
 | Proxy chung | `127.0.0.1:8090` | Chuyển yêu cầu tới AWS |
