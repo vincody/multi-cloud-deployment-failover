@@ -151,7 +151,7 @@ try:
     # The watcher decides on its own: it must see both checks fail three times, then fence and promote.
     outcome = {}
     monitor = threading.Thread(target=lambda: outcome.update(
-        result=watcher.run(watcher.check_web, watcher.check_db, demo.failover, interval=.5, threshold=3, log=lambda _: None)))
+        result=watcher.run(watcher.check_web, watcher.check_db, demo.failover, .5, 3, watcher.blocked, log=lambda _: None)))
     monitor.start()
     killed_at = datetime.now(timezone.utc)
     demo.compose("kill", "database")

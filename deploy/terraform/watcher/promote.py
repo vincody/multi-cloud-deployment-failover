@@ -1,12 +1,13 @@
-"""Root command executed through SSM on Azure; no credentials or start-K3s logic."""
-import fcntl
+"""Promote the Azure standby from the VM itself. Runs as root under the watcher; never starts K3s."""
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import time
 
 ROOT = Path('/opt/dcs29')
+OWNER_PATTERN = re.compile(r'watcher:[0-9TZ:.+-]{10,40}')
 
 
 def sql(query):
@@ -17,7 +18,7 @@ def sql(query):
 
 
 def execute(phase, owner):
-    if phase not in ('preflight', 'promote') or not owner.startswith('arn:aws:states:us-east-1:'):
+    if phase not in ('preflight', 'promote') or not OWNER_PATTERN.fullmatch(owner):
         raise RuntimeError('Invalid operation/incident')
     if not (ROOT / 'automation-result.json').exists():
         raise RuntimeError('Initial replication has not been verified')
@@ -57,8 +58,8 @@ def execute(phase, owner):
     return {'ready': True, 'role': 'standby' if phase == 'preflight' else 'primary'}
 
 
-def main(phase, owner):
+def run_locked(phase, owner):
+    import fcntl  # Linux only; imported here so the module can be loaded for tests elsewhere
     with open('/run/dcs29-promote.lock', 'w') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        result = execute(phase, owner)
-    print('DCS29_RESULT=' + json.dumps(result))
+        return execute(phase, owner)

@@ -8,7 +8,6 @@ watching. Once it has failed over it stops; it never fails back or restarts the 
 """
 import argparse
 import sys
-import time
 from pathlib import Path
 
 import httpx
@@ -17,16 +16,7 @@ import psycopg
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from scripts import local_replication as demo
-
-
-def evaluate(failures, web_ok, db_ok, threshold):
-    """Return (new failure count, verdict). Only a run of agreeing failures reaches 'failover'."""
-    if web_ok and db_ok:
-        return 0, "healthy"
-    if web_ok != db_ok:
-        return failures, "suspect"
-    failures += 1
-    return failures, "failover" if failures >= threshold else "failing"
+from scripts.watcher_core import run
 
 
 def blocked():
@@ -37,29 +27,6 @@ def blocked():
     if state["writer"] != "aws" or state["phase"] != "steady":
         return "busy"
     return None
-
-
-def run(check_web, check_db, failover, interval, threshold, blocked=blocked, log=print, sleep=time.sleep):
-    failures = 0
-    while True:
-        reason = blocked()
-        if reason == "done":
-            log("Azure is already the writer; nothing to do.")
-            return "already-failed-over"
-        if reason == "busy":
-            failures = 0
-        else:
-            web, db = check_web(), check_db()
-            failures, verdict = evaluate(failures, web, db, threshold)
-            log(f"web={web} db={db} verdict={verdict} failures={failures}/{threshold}")
-            if verdict == "failover":
-                try:
-                    failover()
-                except Exception as error:
-                    log(f"Failover stopped, operator needed: {error}")
-                    return "operator-needed"
-                return "failed-over"
-        sleep(interval)
 
 
 def check_web():
@@ -84,7 +51,7 @@ def main():
     parser.add_argument("--threshold", type=int, default=3, help="consecutive agreeing failures before failover")
     args = parser.parse_args()
     try:
-        outcome = run(check_web, check_db, demo.failover, args.interval, args.threshold)
+        outcome = run(check_web, check_db, demo.failover, args.interval, args.threshold, blocked)
     except KeyboardInterrupt:
         return 0
     print(f"Watcher finished: {outcome}")

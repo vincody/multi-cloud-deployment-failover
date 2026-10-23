@@ -38,6 +38,10 @@ enable_health_checks = false
 # Enable DNS only after testing fencing/promote/rejoin. DNS does not promote the DB.
 enable_failover = false
 
-# GĐ6B only: complete manual fencing/promote/rejoin/failback and baseline checks first.
-# Adds CloudWatch/EventBridge/Step Functions/Lambda + Azure SSM hybrid registration.
-enable_auto_failover = false
+# Installs the failover watcher on the Azure VM. Complete manual fencing/promote/rejoin/failback
+# and baseline checks first. Create an access key for the IAM user in output azure_watcher_iam_user
+# outside Terraform and point this at a private INI [default] file holding it.
+enable_auto_failover           = false
+azure_watcher_credentials_file = ""
+watcher_threshold              = 3
+watcher_interval_seconds       = 5

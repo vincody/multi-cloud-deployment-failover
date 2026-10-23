@@ -1,4 +1,4 @@
-from scripts import watcher
+from scripts import watcher_core as watcher
 
 
 def test_evaluate_needs_both_checks_to_fail():
