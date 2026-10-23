@@ -15,7 +15,7 @@ STATE = ROOT / ".local-replication" / PROJECT
 def read_state():
     path = STATE / "state.json"
     if not path.exists():
-        return {"writer": "azure" if (STATE / "promoted").exists() else "aws", "phase": "steady", "archives": []}
+        return {"writer": "aws", "phase": "steady", "archives": []}
     return json.loads(path.read_text(encoding="utf-8"))
 
 

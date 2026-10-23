@@ -76,7 +76,7 @@ try:
     assert httpx.get(azure + "/health/database", trust_env=False).status_code == 503
     assert httpx.post(azure + "/api/issues", json=body | {"request_id": str(uuid4())}, trust_env=False).status_code == 409
     assert httpx.post(azure + path + "/comments", json=aws_comment | {"request_id": str(uuid4())}, trust_env=False).status_code == 409
-    demo.failover()
+    demo.switchover()
     assert request("GET", "/api/database/status", cloud="azure")["writable"]
     try:
         demo.setup()
@@ -108,10 +108,37 @@ try:
     demo.failback()
     assert read_state()["archives"] == archives
     # A second cycle exercises persisted Compose overrides, not just the initial volumes.
-    demo.failover()
+    demo.switchover()
     demo.failback()
     compare_issue(issue["id"])
-    print("PASS: one URL, standby write rejection, unsafe setup blocked, proxy switches, AWS/Azure writes, retry, full data/history preservation, archived volumes, repeat cycle")
+    # A failback stopped after Azure was locked and AWS caught up must resume by re-running it.
+    demo.switchover()
+    demo.rejoin_aws()
+    target = demo.gate("azure", False)
+    demo.wait_replay("aws", target)
+    demo.phase("switching-to-aws", final_lsn=target)
+    demo.failback()
+    compare_issue(issue["id"])
+    # ...and one stopped right after AWS was promoted.
+    demo.switchover()
+    demo.rejoin_aws()
+    target = demo.gate("azure", False)
+    demo.wait_replay("aws", target)
+    demo.phase("switching-to-aws", final_lsn=target)
+    demo.fence("azure")
+    demo.promote("aws")
+    demo.failback()
+    assert not demo.role(demo.AWS_DB) and demo.role(demo.AZURE_DB)
+    compare_issue(issue["id"])
+    # Emergency path: AWS database killed with no warning, then a plain failover.
+    demo.compose("kill", "database")
+    demo.failover()
+    assert request("GET", "/api/database/status", cloud="azure")["writable"]
+    request("POST", path + "/comments", {"request_id": str(uuid4()), "author": "Azure", "body": "Sau khi AWS sập"}, "azure")
+    demo.failback()
+    request("GET", path, cloud="aws")
+    compare_issue(issue["id"])
+    print("PASS: one URL, standby write rejection, unsafe setup blocked, proxy switches, AWS/Azure writes, retry, full data/history preservation, archived volumes, repeat cycle, resumed failback (two stop points), failover after AWS kill")
 finally:
     for process in reversed(processes):
         if process.poll() is None:

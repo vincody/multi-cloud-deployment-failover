@@ -72,7 +72,7 @@ Hai chế độ dùng chung 4 bước fence → promote → verify → route:
 
 ## 5. Các giai đoạn thực hiện
 
-### GĐ A — Làm gọn flow local
+### GĐ A — Làm gọn flow local (đã xong, nhánh `revamp`)
 - Tách `failover` và `switchover` trong `scripts/local_replication.py`.
 - Bỏ cờ `promoted`; `setup` kiểm tra `writer` trong `state.json`.
 - Rút gọn các nhánh "resume" của `failback`, thêm test cho trường hợp lệnh bị dừng giữa chừng.

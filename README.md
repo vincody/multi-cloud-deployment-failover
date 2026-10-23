@@ -40,11 +40,13 @@ Mở **http://127.0.0.1:8090/issues.html** và giữ URL này trong toàn bộ d
 ### Thử failover và failback
 
 1. Tạo issue và bình luận qua cổng 8090; đối chiếu dữ liệu trên web Azure cổng 8081.
-2. Chuyển sang Azure:
+2. Chuyển có kế hoạch sang Azure (không mất dữ liệu):
 
    ```powershell
-   .venv/Scripts/python.exe scripts/local_replication.py failover
+   .venv/Scripts/python.exe scripts/local_replication.py switchover
    ```
+
+   Khi AWS đã sập thật, dùng `failover`: không khóa ghi hay chờ replay, fence AWS rồi promote Azure ngay; giao dịch chưa kịp replicate có thể mất.
 
 3. Giữ URL 8090, kiểm tra nhãn Azure rồi sửa issue hoặc gửi thêm bình luận.
 4. Dựng lại AWS thành standby của Azure và kiểm tra đồng bộ:
@@ -92,7 +94,7 @@ $env:TASKFLOW_DB_TESTS='1'
 .venv/Scripts/python.exe scripts/check_local_lifecycle.py
 ```
 
-Các test database dùng schema riêng. Script lifecycle dựng project Docker riêng, chạy hai vòng failover/failback qua proxy, kiểm tra dữ liệu issue/bình luận/lịch sử, retry và việc giữ volume cũ; chỉ dọn tài nguyên của project kiểm thử. Các cổng `55632/55633`, `18080/18081` và `18090` phải trống.
+Các test database dùng schema riêng. Script lifecycle dựng project Docker riêng, chạy nhiều vòng switchover/failover/failback qua proxy, kiểm tra dữ liệu issue/bình luận/lịch sử, retry và việc giữ volume cũ; chỉ dọn tài nguyên của project kiểm thử. Các cổng `55632/55633`, `18080/18081` và `18090` phải trống.
 
 ## API chính
 

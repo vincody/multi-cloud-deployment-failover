@@ -67,8 +67,6 @@ def _setup():
     state = read_state()
     if state["writer"] != "aws" or state["phase"] != "steady":
         raise RuntimeError("Topology đã chuyển đổi hoặc đang phục hồi; dùng status/failback, không setup lại primary cũ.")
-    if (STATE / "promoted").exists():
-        raise RuntimeError("Failover đã diễn ra. Không khởi động AWS cũ; cần tái đồng bộ trước khi failback.")
     try:
         if not role(AZURE_DB):
             raise RuntimeError("Azure đã là primary. Từ chối khởi động AWS để tránh hai primary.")
@@ -236,38 +234,63 @@ def verify_writer(cloud):
         raise RuntimeError(f"Web {cloud} chưa sẵn sàng; proxy vẫn bị khóa.")
 
 
+def _already_on_azure():
+    state = read_state()
+    if state["writer"] != "azure" or state["phase"] != "steady":
+        return False
+    if role(AZURE_DB):
+        raise RuntimeError("State ghi Azure primary nhưng database vẫn standby.")
+    try:
+        if not role(AWS_DB):
+            raise RuntimeError("AWS cũ vẫn là primary; cần cô lập trước khi tiếp tục.")
+    except psycopg.Error:
+        pass
+    verify_writer("azure")
+    return True
+
+
+def _take_over_on_azure():
+    """Shared tail of failover and switchover: fence the old primary, promote, verify, route."""
+    fence("aws")
+    promote("azure")
+    verify_writer("azure")
+    phase("steady", writer="azure")
+    print("Azure is now the writer; shared proxy routes to Azure.")
+
+
 def failover():
+    """AWS is down: fence and promote at once. Unreplicated transactions may be lost (asynchronous replication)."""
     with operation_lock():
-        state = read_state()
-        if state["writer"] == "azure" and state["phase"] == "steady":
-            if role(AZURE_DB):
-                raise RuntimeError("State ghi Azure primary nhưng database vẫn standby.")
-            try:
-                if not role(AWS_DB):
-                    raise RuntimeError("AWS cũ vẫn là primary; cần cô lập trước khi tiếp tục.")
-            except psycopg.Error:
-                pass
-            verify_writer("azure")
+        if _already_on_azure():
             return
         phase("switching-to-azure")
         try:
-            aws_available = True
             try:
                 role(AWS_DB)
+                print("AWS still answers; use 'switchover' to avoid losing recent transactions.")
             except psycopg.Error:
-                aws_available = False
-            if aws_available:
-                target = gate("aws", False)
-                if role(AZURE_DB):
-                    wait_replay("azure", target)
-            else:
                 print("AWS unavailable; unsent transactions may be lost with asynchronous replication.")
-            (STATE / "promoted").write_text("Do not start old AWS primary before rebuilding from Azure.\n", encoding="utf-8")
-            fence("aws")
-            promote("azure")
-            verify_writer("azure")
-            phase("steady", writer="azure")
-            print("Failover complete: shared proxy now routes to Azure.")
+            _take_over_on_azure()
+        except Exception as error:
+            phase("switching-to-azure", error=str(error))
+            raise
+    show_status()
+
+
+def switchover():
+    """Planned move to Azure with no data loss: stop writes, let Azure catch up, then take over."""
+    with operation_lock():
+        if _already_on_azure():
+            return
+        phase("switching-to-azure")
+        try:
+            try:
+                target = gate("aws", False)
+            except psycopg.Error:
+                raise RuntimeError("AWS không phản hồi; không thể chuyển có kế hoạch. Dùng 'failover'.")
+            if role(AZURE_DB):
+                wait_replay("azure", target)
+            _take_over_on_azure()
         except Exception as error:
             phase("switching-to-azure", error=str(error))
             raise
@@ -343,58 +366,46 @@ def follows(target, source):
 def finish_failback():
     verify_writer("aws")
     phase("rebuilding-azure", writer="aws")
-    (STATE / "promoted").unlink(missing_ok=True)
     if not follows("azure", "aws"):
         rebuild("azure", "aws")
     phase("steady", final_lsn=None)
     print("Failback complete: proxy routes to AWS; Azure is streaming standby again.")
 
 
+def is_standby(cloud):
+    try:
+        return role(DB_PORTS[cloud])
+    except psycopg.Error:
+        return False
+
+
 def failback():
+    """Return to AWS. Each step is safe to repeat, so a stopped run is resumed by running it again."""
     with operation_lock():
         state = read_state()
-        if state["writer"] == "aws" and state["phase"] in {"steady", "rebuilding-azure"}:
+        if state["writer"] == "aws":
             if role(AWS_DB):
                 raise RuntimeError("State ghi AWS primary nhưng database vẫn standby.")
             verify_writer("aws")
             if state["phase"] == "rebuilding-azure":
                 finish_failback()
             return
-        # Resume safely if a previous command stopped Azure and promoted AWS but
-        # failed before it verified the origin or persisted the new routing state.
-        if state["phase"] == "switching-to-aws" and state.get("final_lsn") is not None:
-            try:
-                aws_promoted = not role(AWS_DB)
-            except psycopg.Error:
-                aws_promoted = False
-            if aws_promoted:
-                fence("azure")
-                promote("aws")
-                finish_failback()
-                return
-        # Ensure the old AWS writer is rebuilt before the planned switchover.
+        # final_lsn is recorded once Azure is write-locked and AWS has caught up;
+        # from then on only fence, promote and verify remain.
+        resume = state["phase"] == "switching-to-aws" and state.get("final_lsn") is not None
         try:
-            aws_standby = role(AWS_DB)
-        except psycopg.Error:
-            aws_standby = False
-        if not aws_standby:
-            _rejoin_aws()
-        phase("switching-to-aws")
-        try:
-            azure_available = True
-            try:
-                role(AZURE_DB)
-            except psycopg.Error:
-                azure_available = False
-            if azure_available:
-                target = gate("azure", False)
+            if not resume:
+                if not is_standby("aws"):
+                    _rejoin_aws()
+                phase("switching-to-aws")
+                try:
+                    target = gate("azure", False)
+                except psycopg.Error:
+                    raise RuntimeError("Azure không phản hồi trước khi xác nhận WAL cuối; từ chối failback có kế hoạch.")
                 wait_replay("aws", target)
-            elif read_state().get("final_lsn") is None:
-                raise RuntimeError("Azure unavailable before final WAL verification; refuse planned failback.")
-            if azure_available:
                 phase("switching-to-aws", final_lsn=target)
-            else:
-                wait_replay("aws", read_state()["final_lsn"])
+            elif is_standby("aws"):
+                wait_replay("aws", state["final_lsn"])
             fence("azure")
             promote("aws")
             verify_writer("aws")
@@ -408,11 +419,11 @@ def failback():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("setup", "status", "start-web", "start-proxy", "failover", "rejoin-aws", "failback"))
+    parser.add_argument("action", choices=("setup", "status", "start-web", "start-proxy", "failover", "switchover", "rejoin-aws", "failback"))
     args = parser.parse_args()
     try:
         {"setup": setup, "status": show_status, "start-web": start_web, "start-proxy": start_proxy,
-         "failover": failover, "rejoin-aws": rejoin_aws, "failback": failback}[args.action]()
+         "failover": failover, "switchover": switchover, "rejoin-aws": rejoin_aws, "failback": failback}[args.action]()
     except (RuntimeError, psycopg.Error, subprocess.CalledProcessError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         sys.exit(1)
