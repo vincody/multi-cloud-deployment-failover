@@ -63,7 +63,7 @@ Password PostgreSQL/WireGuard private key không đi qua Terraform state hoặc 
 
 Kubernetes Secrets không được coi là mã hóa chỉ vì lưu base64. Kubeconfig và các file root phải được bảo vệ; bản sao lưu credential cần được giữ ngoài VM ở nơi riêng. Automation không tạo secret vault/KMS hoặc backup ngoài VM.
 
-Schema hiện có gồm `app_control`, `issues`, `comments`, `issue_history`, `save_requests`; lấy từ code `database/`, không hardcode một schema khác trong Terraform. Chỉ primary chạy initialize; Azure nhận toàn bộ dữ liệu/schema/role qua physical replication. `issues_app` sở hữu database và có `pg_read_all_stats` để API báo được trạng thái WAL receiver; không dùng superuser cho app.
+Schema hiện có gồm `app_control`, `issues`, `comments`, `issue_history`, `save_requests`, `probe_pings`; lấy từ code `database/`, không hardcode một schema khác trong Terraform. Chỉ primary chạy initialize (câu lệnh `CREATE ... IF NOT EXISTS`, chạy lại an toàn; với bản đã triển khai trước khi có `probe_pings`, chạy `python -c "from database.issues import initialize; initialize()"` một lần trên pod app AWS và image phải đủ mới để có `/api/ping`); Azure nhận toàn bộ dữ liệu/schema/role qua physical replication. `issues_app` sở hữu database và có `pg_read_all_stats` để API báo được trạng thái WAL receiver; không dùng superuser cho app.
 
 PVC yêu cầu 5 GiB là mức lập kế hoạch, **local-path không giới hạn cứng dung lượng**. WAL, image/container logs và bản clone/rejoin bổ sung vẫn dùng cùng OS disk 30 GiB. PV được patch Retain sau khi database sẵn sàng; policy này không bảo vệ dữ liệu khi xóa VM/OS disk. Theo dõi dung lượng và sao lưu ngoài VM trước destroy.
 
@@ -101,7 +101,7 @@ DNS chỉ chọn origin; không promote PostgreSQL hoặc đồng bộ bản nh�
 
 ## 6. Kiểm thử đã thực hiện
 
-- Terraform fmt/validate và 11 mock-provider tests: hạ tầng, chế độ infra-only, thiếu đầu vào, health check/DNS guard; không tạo tài nguyên cloud.
+- Terraform fmt/validate và 14 mock-provider tests: hạ tầng, chế độ infra-only, thiếu đầu vào, health check/DNS guard, watcher opt-in, bước `-target` tạo IAM user trước và quyền IAM của nó; không tạo tài nguyên cloud.
 - Python offline tests: thứ tự schema trước standby, Azure promote chặn trước mutation, clone marker/PVC generation, request ID được lưu trước POST và retry, validation key/image.
 - Container cách ly dùng manifest/config thực tế: SQL role/schema, `database.issues.initialize()`, base backup, tạo lại passfile sau restart init, API primary/standby/streaming với user app, replay issue/history và POST idempotent.
 

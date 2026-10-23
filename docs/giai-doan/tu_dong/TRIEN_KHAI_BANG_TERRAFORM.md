@@ -21,7 +21,7 @@ Terraform tạo hai VM/K3s, WireGuard, PostgreSQL primary/standby, schema và ap
 
 **Cách đọc:** phần chính là luồng triển khai VM mới. Các mục tham khảo, hướng dẫn vận hành hoặc bước tùy chọn được trình bày trực tiếp bên dưới; đọc khi cần. Toàn bộ lệnh/manifest vẫn nằm trong file này. Giữ số mục gốc để các tham chiếu cũ tiếp tục dùng được.
 
-**Điểm dừng:** apply lỗi thì giữ state/VM/PVC và dùng [mục 7.2](#72-nếu-automation-thất-bại-hoặc-cần-chạy-lại); TLS lỗi dùng [mục 8.5](#85-retry-credential-rotation-và-phạm-vi). Không promote khi tạo health check, không chạy promote tay song song với workflow tự động. Khi bảo trì/rejoin, làm theo điều kiện dừng controller của mục 9.2.
+**Điểm dừng:** apply lỗi thì giữ state/VM/PVC và dùng [mục 7.2](#72-nếu-automation-thất-bại-hoặc-cần-chạy-lại); TLS lỗi dùng [mục 8.5](#85-retry-credential-rotation-và-phạm-vi). Không promote khi tạo health check, không chạy promote tay song song với watcher tự động. Khi bảo trì/rejoin, tạo `watcher.pause` theo mục 9.2.
 
 ## 1. Hiểu phạm vi tự động hóa
 
@@ -832,7 +832,7 @@ Hai DNS origin phải trả đúng IP trên; ba lệnh readiness phải thành c
 
 3. Bấm **Save dashboard**, đặt tên ví dụ `DCS29 - Multi-cloud external health`. Chọn timezone **UTC** trong dashboard settings nếu UI có, hoặc ghi rõ timezone đang hiển thị trong báo cáo. Mốc đo ở GD8 phải ghi UTC.
 4. Để đánh dấu lần test: trong dashboard, tạo **Annotation** tại thời điểm bạn dừng/khôi phục app (tùy phiên bản Grafana: Ctrl+click vào biểu đồ, hoặc menu annotation của dashboard). Nội dung ngắn, ví dụ `t_action stop AWS app`, `t_detect Route53 unhealthy`, `t_first_B first azure-standby`, `t_stable shared healthy`, kèm UTC. Đây là mốc thao tác thủ công, không suy ra từ riêng đồ thị 10 giây.
-5. Export dashboard JSON qua menu **Share/Export → Export as JSON** hoặc **Dashboard settings → JSON model** (vị trí tùy phiên bản), lưu trong `observability/grafana/dcs29-dashboard.json` nếu muốn version-control. Kiểm tra JSON không chứa password/token trước khi commit. Screenshot chỉ là hình minh họa; JSON + dữ liệu thô mới đủ tái kiểm tra.
+5. Export dashboard JSON qua menu **Share/Export → Export as JSON** hoặc **Dashboard settings → JSON model** (vị trí tùy phiên bản), lưu trong `observability/grafana/dashboards/` (thư mục này được Grafana tự nạp, đã có `dcs29-failover.json`) nếu muốn version-control. Kiểm tra JSON không chứa password/token trước khi commit. Screenshot chỉ là hình minh họa; JSON + dữ liệu thô mới đủ tái kiểm tra.
 
 **Lưu ý về app metrics:** `/metrics` trong FastAPI có `dcs29_http_requests_total` và `dcs29_http_request_duration_seconds`. Cấu hình GD7 **chưa scrape hai endpoint này** để không phụ thuộc vào việc mở metrics qua Internet. Do đó panel request rate và latency **bên trong app** chưa có dữ liệu. Đừng tạo panel rồi diễn giải `No data` thành ứng dụng không có request. Nếu cần các panel này ở giai đoạn sau, thiết kế đường truy cập bảo vệ `/metrics` (ví dụ VPN/SSH tunnel hoặc allowlist ổn định) rồi mới thêm scrape job; không thêm `https://.../metrics` công khai chỉ cho tiện demo. Hãy kiểm tra ingress Traefik hiện tại: nếu URL `/metrics` đang được truy cập từ Internet, endpoint đó đang public từ GD5 và nên được hạn chế trước khi triển khai thật.
 

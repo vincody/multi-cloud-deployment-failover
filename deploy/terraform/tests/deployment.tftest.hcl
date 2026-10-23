@@ -124,6 +124,20 @@ run "watcher_opt_in" {
   }
 }
 
+run "watcher_user_first" {
+  command = plan
+  plan_options {
+    target = [aws_iam_user.azure_watcher, aws_iam_user_policy.azure_watcher]
+  }
+  variables {
+    enable_auto_failover = true
+  }
+  assert {
+    condition     = length(aws_iam_user.azure_watcher) == 1 && length(aws_iam_user_policy.azure_watcher) == 1
+    error_message = "The documented -target step must plan the watcher IAM user and policy without installing the watcher."
+  }
+}
+
 run "reject_watcher_before_baseline" {
   command = plan
   variables {
