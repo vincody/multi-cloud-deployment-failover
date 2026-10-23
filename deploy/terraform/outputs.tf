@@ -35,6 +35,7 @@ output "route53_nameservers" {
 }
 
 output "origin_hosts" {
+  description = "Origin hostnames and the shared failover hostname."
   value = {
     aws    = local.aws_origin_host
     azure  = local.azure_origin_host

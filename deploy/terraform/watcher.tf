@@ -1,27 +1,3 @@
-variable "enable_auto_failover" {
-  description = "Install the one-way AWS->Azure failover watcher on the Azure VM after a successful manual drill. No automatic failback."
-  type        = bool
-  default     = false
-}
-
-variable "azure_watcher_credentials_file" {
-  description = "Local INI [default] file with the access key of the watcher IAM user (see output azure_watcher_iam_user). Only the path enters state. Empty reuses the file already on the VM."
-  type        = string
-  default     = ""
-}
-
-variable "watcher_threshold" {
-  description = "Consecutive checks on which both views must agree that AWS is down before failing over."
-  type        = number
-  default     = 3
-}
-
-variable "watcher_interval_seconds" {
-  description = "Seconds between watcher checks."
-  type        = number
-  default     = 5
-}
-
 # The access key is created outside Terraform so the secret never enters state.
 resource "aws_iam_user" "azure_watcher" {
   count         = var.enable_auto_failover ? 1 : 0

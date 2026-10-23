@@ -1,25 +1,3 @@
-variable "enable_https" {
-  description = "Provision HTTPS after public DNS delegation is ready; requires workload automation."
-  type        = bool
-  default     = false
-}
-
-variable "certificate_email" {
-  description = "Contact email for Let's Encrypt registration."
-  type        = string
-  default     = ""
-  validation {
-    condition     = var.certificate_email == "" || can(regex("^[A-Za-z0-9._+%-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$", var.certificate_email))
-    error_message = "Set a valid certificate contact email."
-  }
-}
-
-variable "azure_dns_credentials_file" {
-  description = "Local INI [default] credential file for the Azure DNS-only IAM user. Only the path enters state. Empty reuses an existing VM file."
-  type        = string
-  default     = ""
-}
-
 locals {
   https_config = merge(local.automation_config, {
     domain           = var.domain_name

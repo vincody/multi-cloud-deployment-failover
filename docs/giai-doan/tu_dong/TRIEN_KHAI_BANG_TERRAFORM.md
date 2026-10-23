@@ -315,6 +315,8 @@ enable_health_checks = true
 enable_failover      = false
 ```
 
+Thời gian health check và DNS quyết định phần lớn failover time trên cloud, nên chỉnh được bằng biến (giá trị dưới là mặc định): `health_check_interval_seconds = 30` (chỉ nhận 10 hoặc 30; 10 là fast interval, tính thêm phí mỗi health check), `health_check_failure_threshold = 3`, `dns_ttl_seconds = 30` cho cặp CNAME `app`. Thời gian Route 53 cần để đánh dấu origin lỗi là `interval × threshold` (mặc định 90 giây); `terraform output dns_failover_timing` cho giá trị đang áp dụng. Giữ nguyên các giá trị này giữa các lượt đo (mục 13) và ghi vào manifest.
+
 Trên **PowerShell laptop**, ở `deploy/terraform`:
 
 ```powershell

@@ -10,7 +10,7 @@ Thư mục này tạo lại hạ tầng của [lộ trình GĐ3–GĐ6](../../do
 | GĐ4 Azure | Resource Group `dcs29-rg`, VNet/subnet, NSG, Standard Static Public IP, NIC, Ubuntu 24.04 x86-64 VM và disk; gắn cùng SSH public key vào tài khoản quản trị |
 | GĐ5 DNS/TLS | Route 53 zone/A records/IAM; khi `enable_https=true` tự cấp certificate, TLS Secret/Ingress, redirect và renewal (**không tạo access key**) |
 | GĐ6B tự động | Opt-in `enable_auto_failover`: watcher trên VM Azure và IAM user quyền hẹp (describe/stop EC2, đọc health check); chỉ bật sau diễn tập thủ công |
-| GĐ6 failover | Hai HTTPS health check khi `enable_health_checks = true`; cặp CNAME `app` primary/secondary khi `enable_failover = true` |
+| GĐ6 failover | Hai HTTPS health check khi `enable_health_checks = true`; cặp CNAME `app` primary/secondary khi `enable_failover = true`; chu kỳ, ngưỡng và TTL chỉnh bằng `health_check_interval_seconds`, `health_check_failure_threshold`, `dns_ttl_seconds` |
 
 VM mới cài hai cụm K3s độc lập bằng cùng `k3s_version`. Khi `enable_workload_automation=true` (mặc định), `terraform_data.workloads` dùng Python/OpenSSH từ laptop để tạo WireGuard, PostgreSQL 17/PVC/Secret, bootstrap schema trên AWS, clone standby Azure, triển khai Issues cùng GHCR digest và HTTP Ingress. Apply chỉ hoàn tất sau kiểm tra role, streaming, cùng commit và issue mẫu đã replay sang Azure. UDP 51820 chỉ mở từ IP peer; không mở 5432/6443/metrics ra Internet.
 

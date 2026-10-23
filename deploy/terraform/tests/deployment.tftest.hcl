@@ -216,3 +216,49 @@ run "dns_after_healthy_checks" {
     error_message = "Enabling failover must create both app CNAME records."
   }
 }
+
+run "dns_timing_is_configurable" {
+  command = plan
+
+  variables {
+    enable_health_checks           = true
+    enable_failover                = true
+    health_check_interval_seconds  = 10
+    health_check_failure_threshold = 2
+    dns_ttl_seconds                = 15
+  }
+
+  assert {
+    condition     = aws_route53_health_check.aws_origin[0].request_interval == 10 && aws_route53_health_check.aws_origin[0].failure_threshold == 2 && aws_route53_record.app_primary[0].ttl == 15
+    error_message = "Health check timing and the app CNAME TTL must follow the variables."
+  }
+
+  assert {
+    condition     = output.dns_failover_timing.health_check_detection_seconds == 20 && output.dns_failover_timing.app_cname_ttl_seconds == 15
+    error_message = "The timing output must report detection time as interval x threshold."
+  }
+}
+
+run "defaults_keep_the_documented_timing" {
+  command = plan
+
+  variables {
+    enable_health_checks = true
+    enable_failover      = true
+  }
+
+  assert {
+    condition     = output.dns_failover_timing.health_check_detection_seconds == 90 && output.dns_failover_timing.app_cname_ttl_seconds == 30
+    error_message = "Defaults must stay 30 s interval x 3 checks and a 30 s TTL."
+  }
+}
+
+run "reject_unsupported_health_check_interval" {
+  command = plan
+
+  variables {
+    health_check_interval_seconds = 20
+  }
+
+  expect_failures = [var.health_check_interval_seconds]
+}

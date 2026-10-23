@@ -41,7 +41,7 @@ Các bước trong `timeline`: `start`, `writes-paused-<cloud>`, `replayed-<clou
 
 Số đo local không dùng làm số đo cloud. Trên cloud, thời gian failover còn gồm:
 
-- Chu kỳ health check Route 53 × số lần lỗi liên tiếp để phát hiện;
+- Chu kỳ health check Route 53 × số lần lỗi liên tiếp để phát hiện (mặc định 30 giây × 3; xem `terraform output dns_failover_timing`);
 - TTL của DNS và cache phía client;
 - Thời gian dừng EC2 (fence) và promote PostgreSQL trong K3s.
 
