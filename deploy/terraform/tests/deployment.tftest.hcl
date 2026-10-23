@@ -53,8 +53,8 @@ run "infrastructure_only" {
   command = plan
   variables {
     enable_workload_automation = false
-    ssh_private_key_path      = ""
-    postgres_image            = ""
+    ssh_private_key_path       = ""
+    postgres_image             = ""
   }
   assert {
     condition     = length(terraform_data.workloads) == 0 && length(aws_vpc_security_group_ingress_rule.wireguard) == 0 && length(azurerm_network_security_rule.wireguard) == 0
