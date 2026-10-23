@@ -104,7 +104,7 @@ Hai chế độ dùng chung 4 bước fence → promote → verify → route:
 
 ### GĐ F — Dọn repo và tài liệu (một phần)
 - Đã xong: `pytest.ini` (`testpaths = tests deploy/terraform`, `pythonpath = .`), xóa file/tài liệu thừa trong các giai đoạn trước, gộp nhánh tài liệu failover tự động về một nguồn.
-- Chưa làm, cần chủ repo quyết định: ảnh tạm chưa track (`debug/`, `errors_fix/`, `images_testing/`, `images/ref*`, `images/image.png`, bản `-legacy` của sơ đồ); tài liệu bạn đã xóa (`HUONG_DAN_29_...`, `GOI_Y_CHON_DE_TAI`, `PHAN_TICH_DE_TAI_29`) và `experiments/` đang ở trạng thái xóa chưa commit; `docs/mota.md`; sơ đồ kiến trúc (`images/ARCHITECTURE.md`, `scripts/architecture_diagram.py`, `scripts/build_multicloud_diagram.py`) vẫn mô tả Step Functions/`/health/ready` cũ.
+- Chưa làm, cần chủ repo quyết định: ảnh tạm chưa track (`debug/`, `errors_fix/`, `images_testing/`, `images/ref*`, `images/image.png`, bản `-legacy` của sơ đồ); tài liệu bạn đã xóa (`HUONG_DAN_29_...`, `GOI_Y_CHON_DE_TAI`, `PHAN_TICH_DE_TAI_29`) và `experiments/` đang ở trạng thái xóa chưa commit; `docs/mota.md`; (sơ đồ kiến trúc đã cập nhật cho watcher; SVG là nguồn duy nhất, không còn script sinh hình).
 - Cố ý giữ: mật khẩu demo trong Compose/script local (đã ghi rõ chỉ dành cho local); tên database/user `taskflow` (đổi sẽ ảnh hưởng volume hiện có); các cờ `enable_*` theo từng lượt apply.
 
 ## 6. Việc chưa quyết
