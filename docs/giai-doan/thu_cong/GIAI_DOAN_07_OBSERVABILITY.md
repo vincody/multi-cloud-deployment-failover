@@ -166,24 +166,20 @@ Hai DNS origin phải trả đúng IP trên; ba lệnh liveness phải thành c�
 3. Mở `http://localhost:3000` → đăng nhập username `admin`, password bạn đã đặt ở 7.2. Nếu Grafana hỏi đổi mật khẩu thì đặt mật khẩu mới và ghi nhớ; thay đổi này nằm trong volume Grafana. Lần sau sửa `.env` **không tự đổi** mật khẩu của user đã tạo trong volume.
 4. Menu **Connections → Data sources** (hoặc **Configuration → Data sources** tùy phiên bản) → chọn **Prometheus**. URL phải là `http://prometheus:9090`; datasource này được tạo sẵn từ file provisioning và có thể ở chế độ chỉ đọc. Nếu có nút **Save & test/Test**, bấm thử. Nếu không có, mở **Explore**, chọn datasource **Prometheus**, chạy `probe_success{job="blackbox_https"}` để xác nhận có dữ liệu. Không tạo datasource thứ hai trùng tên.
 
-### 7.8. LAPTOP / GRAFANA — tạo dashboard theo từng panel
+### 7.8. LAPTOP / GRAFANA — dashboard có sẵn
 
-> Repo đã có sẵn dashboard `DCS29 - Failover` (provisioning trong `observability/grafana/dashboards/`): panel Writer cho thấy origin nào nhận ghi, hai panel còn lại là health và thời gian phản hồi. Các bước tạo panel thủ công bên dưới chỉ cần khi muốn thêm panel riêng.
+Khi chạy stack ở 7.3, Grafana tự nạp dashboard **`DCS29 - Failover`** từ `observability/grafana/dashboards/dcs29-failover.json` (Dashboards → tìm theo tên). Không cần tạo panel tay. Các panel và cách đọc:
 
-1. Grafana → **Dashboards → New → New dashboard → Add visualization** → chọn datasource **Prometheus**.
-2. Tạo từng panel từ bảng dưới. Trong editor panel, chọn loại hiển thị; nhập PromQL ở ô query; đổi **Title**; **Apply/Back to dashboard**; lặp lại. Với panel có ba series, đặt legend `{{target_name}}` để phân biệt AWS/Azure/domain. Chọn time range `Last 30 minutes` và refresh `10s` ở góc dashboard. UI có thể thay đổi tên nút giữa các phiên bản.
+| Panel | PromQL | Cách đọc |
+|---|---|---|
+| **Writer: origin đang nhận ghi** | `probe_success{job="blackbox_writer"}` | `1` ở origin đang là writer; standby luôn `0`. Đây là panel thấy rõ writer chuyển từ AWS sang Azure |
+| **Origin còn phản hồi** | `probe_success{job="blackbox_https"}` | `1` healthy, `0` lỗi (đo process/TLS qua `/health/live`) |
+| **Thời gian phản hồi probe** | `probe_duration_seconds{job="blackbox_https"}` | Giây cho toàn bộ probe từ laptop; không phải latency riêng trong FastAPI |
+| **HTTP status của probe** | `probe_http_status_code{job="blackbox_https"}` | `200` thành công; `502/503` app/Service lỗi qua Traefik; `0` thường là chưa nhận HTTP response |
+| **Tỷ lệ probe lỗi (5 phút)** | `1 - avg_over_time(probe_success{job="blackbox_https"}[5m])` | Tỷ lệ `0–1` |
+| **TLS còn hạn (ngày)** | `(probe_ssl_earliest_cert_expiry{job="blackbox_https"} - time()) / 86400` | Ngày còn lại |
 
-   | Panel / loại | PromQL | Cách đọc |
-   |---|---|---|
-   | **Health ba target** / Time series hoặc State timeline | `probe_success{job="blackbox_https"}` | `1` healthy, `0` lỗi; legend `{{target_name}}` |
-   | **HTTP status** / Time series | `probe_http_status_code{job="blackbox_https"}` | `200` thành công; `502/503` app/Service lỗi qua Traefik; `0` thường là chưa nhận HTTP response |
-   | **Độ trễ probe** / Time series | `probe_duration_seconds{job="blackbox_https"}` | Giây cho toàn bộ probe từ laptop; không phải latency riêng trong FastAPI |
-   | **Tỷ lệ probe lỗi 5 phút** / Time series | `1 - avg_over_time(probe_success{job="blackbox_https"}[5m])` | Tỷ lệ `0–1`; đặt Unit = Percent (0.0–1.0) |
-   | **TLS còn hạn** / Time series hoặc Stat | `(probe_ssl_earliest_cert_expiry{job="blackbox_https"} - time()) / 86400` | Ngày còn lại; đặt Unit = days |
-
-3. Bấm **Save dashboard**, đặt tên ví dụ `DCS29 - Multi-cloud external health`. Chọn timezone **UTC** trong dashboard settings nếu UI có, hoặc ghi rõ timezone đang hiển thị trong báo cáo. Mốc đo ở GD8 phải ghi UTC.
-4. Để đánh dấu lần test: trong dashboard, tạo **Annotation** tại thời điểm bạn dừng/khôi phục app (tùy phiên bản Grafana: Ctrl+click vào biểu đồ, hoặc menu annotation của dashboard). Nội dung ngắn, ví dụ `t_action stop AWS app`, `t_detect Route53 unhealthy`, `t_first_B first Azure response after promotion`, `t_stable shared healthy`, kèm UTC. Đây là mốc thao tác thủ công, không suy ra từ riêng đồ thị 10 giây.
-5. Export dashboard JSON qua menu **Share/Export → Export as JSON** hoặc **Dashboard settings → JSON model** (vị trí tùy phiên bản), lưu trong `observability/grafana/dashboards/` (thư mục này được Grafana tự nạp, đã có `dcs29-failover.json`) nếu muốn version-control. Kiểm tra JSON không chứa password/token trước khi commit. Screenshot chỉ là hình minh họa; JSON + dữ liệu thô mới đủ tái kiểm tra.
+Dashboard mặc định dùng múi giờ UTC; mốc đo ở GD8 phải ghi UTC. Muốn thêm panel riêng: Dashboards → New → Add visualization, chọn datasource Prometheus, nhập PromQL; muốn giữ lại thì export JSON (**Share/Export → Export as JSON**) và lưu vào `observability/grafana/dashboards/`, Grafana sẽ nạp lần khởi động sau. Để đánh dấu lần test, tạo **Annotation** tại thời điểm bạn dừng/khôi phục app (ví dụ `t_action stop AWS app`, `t_detect Route53 unhealthy`, `t_first_B first Azure response after promotion`, `t_stable shared healthy`, kèm UTC); đây là mốc thao tác thủ công, không suy ra từ đồ thị lấy mẫu 10 giây. Screenshot chỉ là hình minh họa; JSON dashboard và dữ liệu thô mới đủ tái kiểm tra.
 
 **Lưu ý về app metrics:** `/metrics` trong FastAPI có `dcs29_http_requests_total` và `dcs29_http_request_duration_seconds`. Cấu hình GD7 **chưa scrape hai endpoint này** để không phụ thuộc vào việc mở metrics qua Internet. Do đó panel request rate và latency **bên trong app** chưa có dữ liệu. Đừng tạo panel rồi diễn giải `No data` thành ứng dụng không có request. Nếu cần các panel này ở giai đoạn sau, thiết kế đường truy cập bảo vệ `/metrics` (ví dụ VPN/SSH tunnel hoặc allowlist ổn định) rồi mới thêm scrape job; không thêm `https://.../metrics` công khai chỉ cho tiện demo. Hãy kiểm tra ingress Traefik hiện tại: nếu URL `/metrics` đang được truy cập từ Internet, endpoint đó đang public từ GD5 và nên được hạn chế trước khi triển khai thật.
 
@@ -302,7 +298,7 @@ Prometheus → Targets: kube_state_aws/azure UP. Query thử metric dưới trư
 
 ### D. Grafana panel pod/replica
 
-Giữ cách tạo panel ở 7.8, thêm các query:
+Thêm panel riêng theo cách nêu ở 7.8 với các query:
 
 | Panel | PromQL | Legend gợi ý |
 |---|---|---|
@@ -486,7 +482,7 @@ docker compose --env-file observability/.env -f observability/compose.yaml resta
 
 Kiểm tra Targets UP **từ container**; Docker Desktop phải truy cập được host listener. Nếu không được, không đổi listener thành 0.0.0.0; kiểm tra hỗ trợ host networking của Docker Desktop và cấu hình mạng monitor tách biệt trước demo.
 
-Grafana tạo panel theo cách ở 7.8:
+Thêm các panel theo cách nêu ở 7.8:
 
 | Panel | PromQL |
 |---|---|

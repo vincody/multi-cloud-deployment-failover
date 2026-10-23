@@ -2,7 +2,7 @@
   "uid": "dcs29-failover",
   "title": "DCS29 - Failover",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "timezone": "utc",
   "refresh": "10s",
   "time": {
@@ -116,6 +116,110 @@
             "lineInterpolation": "linear"
           },
           "unit": "s"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "title": "HTTP status của probe",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "dcs29-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 15,
+        "w": 12,
+        "h": 7
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "dcs29-prometheus"
+          },
+          "expr": "probe_http_status_code{job=\"blackbox_https\"}",
+          "legendFormat": "{{target_name}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineInterpolation": "linear"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "title": "Tỷ lệ probe lỗi (5 phút)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "dcs29-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 15,
+        "w": 12,
+        "h": 7
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "dcs29-prometheus"
+          },
+          "expr": "1 - avg_over_time(probe_success{job=\"blackbox_https\"}[5m])",
+          "legendFormat": "{{target_name}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineInterpolation": "linear"
+          },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "title": "TLS còn hạn (ngày)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "dcs29-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 22,
+        "w": 24,
+        "h": 7
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "dcs29-prometheus"
+          },
+          "expr": "(probe_ssl_earliest_cert_expiry{job=\"blackbox_https\"} - time()) / 86400",
+          "legendFormat": "{{target_name}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineInterpolation": "linear"
+          },
+          "unit": "d"
         },
         "overrides": []
       }
