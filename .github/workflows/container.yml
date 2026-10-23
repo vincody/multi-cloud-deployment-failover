@@ -1,11 +1,23 @@
 name: Test and publish container
 
+# Documentation, diagrams and monitoring config do not change the image, so they skip the
+# build. Tag pushes ignore path filters and always publish.
 on:
   push:
     branches: [main]
     tags: ["v*"]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "images/**"
+      - "observability/**"
   pull_request:
     branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "images/**"
+      - "observability/**"
 
 permissions:
   contents: read
