@@ -625,17 +625,22 @@ Cơ chế, quyết định, quyền AWS và vận hành chi tiết nằm ở [Fa
    aws_secret_access_key = ...
    ```
 
-#### 2. Apply
+#### 2. Apply (hai bước)
+
+Bước cài watcher cần file key, nên tạo IAM user trước, lấy key rồi mới cài. Nếu apply đầy đủ khi chưa có file key, Terraform vẫn tạo user nhưng dừng lỗi ở bước cài watcher (`Watcher AWS credentials missing`); chạy lại sau khi có key là được.
 
 ```powershell
-# terraform.tfvars
-# enable_auto_failover           = true
-# azure_watcher_credentials_file = "C:/path/outside/repo/watcher-credentials.ini"
+# terraform.tfvars: enable_auto_failover = true
+terraform plan  -target=aws_iam_user.azure_watcher -target=aws_iam_user_policy.azure_watcher
+terraform apply -target=aws_iam_user.azure_watcher -target=aws_iam_user_policy.azure_watcher
+# Console -> IAM -> dcs29-azure-watcher -> tạo access key, lưu vào file INI ngoài repo (xem bước 1)
+
+# terraform.tfvars: azure_watcher_credentials_file = "C:/path/outside/repo/watcher-credentials.ini"
 terraform plan
 terraform apply
 ```
 
-Lần đầu apply chỉ tạo IAM user vì chưa có file key; tạo key rồi apply lại để cài watcher. Plan phải chỉ thêm `aws_iam_user`, `aws_iam_user_policy` và `terraform_data.watcher`; không replace VM, disk hay PVC. Bước cài đặt chạy trên laptop qua SSH: kiểm tra Azure là standby streaming, cài `python3-boto3`, copy ba tệp watcher, ghi cấu hình và credential, chạy `cloud_watcher.py --check`, rồi bật dịch vụ.
+Terraform cảnh báo về `-target`; đây là lần dùng có chủ đích để tách việc tạo quyền khỏi việc cài dịch vụ. Plan của lượt thứ hai chỉ được thêm `terraform_data.watcher`; không replace VM, disk hay PVC. Bước cài đặt chạy trên laptop qua SSH: kiểm tra Azure là standby streaming, cài `python3-boto3`, copy ba tệp watcher, ghi cấu hình và credential, chạy `cloud_watcher.py --check`, rồi bật dịch vụ.
 
 #### 3. Kiểm tra sau khi bật
 

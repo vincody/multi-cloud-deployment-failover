@@ -329,7 +329,7 @@ Plan lần này chỉ nên thêm **hai CNAME failover `app`**. Kiểm tra DNS au
 
 ## 6. Failover tự động GĐ6B (lượt apply thứ năm)
 
-Sau diễn tập fencing/promote/rejoin/failback thủ công, trở về AWS primary/Azure standby streaming rồi giữ bốn flag workload/HTTPS/health check/DNS bật và thêm `enable_auto_failover=true`. Lần apply đầu chỉ tạo IAM user `dcs29-azure-watcher`; tạo access key ngoài Terraform, lưu vào file INI riêng, đặt `azure_watcher_credentials_file` rồi apply lại để cài watcher.
+Sau diễn tập fencing/promote/rejoin/failback thủ công, trở về AWS primary/Azure standby streaming rồi giữ bốn flag workload/HTTPS/health check/DNS bật và thêm `enable_auto_failover=true`. Tạo IAM user trước bằng `terraform apply -target=aws_iam_user.azure_watcher -target=aws_iam_user_policy.azure_watcher`, tạo access key ngoài Terraform và lưu vào file INI riêng, đặt `azure_watcher_credentials_file` rồi apply đầy đủ để cài watcher (apply đầy đủ khi chưa có key sẽ dừng lỗi ở bước cài).
 
 ```powershell
 terraform init
