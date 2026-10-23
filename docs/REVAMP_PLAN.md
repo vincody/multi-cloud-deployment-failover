@@ -96,19 +96,16 @@ Hai chế độ dùng chung 4 bước fence → promote → verify → route:
 - Gỡ `deploy/terraform/failover.tf`, `failover/lambda/`, `workflow.json.tmpl`, `enable_auto_failover` và `AUTOMATION_FAILOVER.md`, GĐ6B thủ công.
 - Làm trong **một commit riêng** để có thể khôi phục.
 
-### GĐ E — Giám sát và tài liệu
-- Prometheus: job `blackbox_writer` probe `/health/database` của cả hai origin, kèm dashboard Grafana `DCS29 - Failover` được provisioning sẵn (đã xong; chưa chạy trên stack Grafana thật, cấu hình Prometheus đã qua `promtool check config`).
-- Cập nhật GĐ6 và GĐ8 theo flow mới; rút gọn `TRIEN_KHAI_BANG_TERRAFORM.md` (hiện 1.809 dòng).
-- Viết mục trade-off: độ phức tạp vận hành, RPO > 0, split-brain, watcher là điểm lỗi duy nhất, replication không phải backup.
+### GĐ E — Giám sát và tài liệu (đã xong, nhánh `revamp`)
+- Prometheus: job `blackbox_writer` probe `/health/database` của cả hai origin, kèm dashboard Grafana `DCS29 - Failover` được provisioning sẵn (chưa chạy trên stack Grafana thật; cấu hình Prometheus đã qua `promtool check config`).
+- GĐ6 và GĐ8 đã cập nhật theo flow mới; mục 9.2 của hướng dẫn Terraform và `AUTOMATION_FAILOVER.md` viết lại cho watcher.
+- Mục trade-off: `docs/TRADE_OFFS.md`.
+- **Không làm:** rút gọn `TRIEN_KHAI_BANG_TERRAFORM.md`. Đây là hướng dẫn thao tác từng bước, không chạy thử được ở local; cắt mạnh mà không kiểm chứng trên cloud có nguy cơ làm mất bước cần thiết. Nếu cần, rút gọn sau lượt nghiệm thu thật.
 
-### GĐ F — Dọn repo và tài liệu (làm sau cùng)
-- Thêm `pytest.ini` (`testpaths = tests deploy/terraform`) để `pytest` ở thư mục gốc không thu nhầm `tmp/`. **Đã xong.**
-- Gom hoặc bỏ ảnh tạm chưa track (`debug/`, `errors_fix/`, `images_testing/`, `images/ref*`, `images/image.png`, bản `-legacy` của sơ đồ); ảnh tham khảo không cần nằm trong repo nộp bài.
-- Gộp tài liệu về một nguồn: `README.md` (chạy demo, kiến trúc một trang), `docs/REVAMP_PLAN.md`, `docs/runbook.md` (failover, rejoin, failback), nhánh thủ công cũ chuyển vào `docs/archive/`. Rút `TRIEN_KHAI_BANG_TERRAFORM.md` (1.809 dòng) xuống vài trăm dòng và hợp nhất `DESIGN.md`/`REQUIREMENTS.md` nếu trùng.
-- Đưa mật khẩu demo vào biến môi trường/`.env.example`.
-- Tên DB/user `taskflow` chỉ đổi khi dựng lại từ đầu (đổi sẽ ảnh hưởng volume hiện có); nếu không đổi thì ghi chú là tên lịch sử.
-- Sau khi bỏ nhánh Step Functions, rút bớt các cờ `enable_*` trong `variables.tf`.
-- Làm test DB dễ chạy hơn (ghi lệnh đầy đủ ở đầu README, tránh 6 test bị skip mà không biết).
+### GĐ F — Dọn repo và tài liệu (một phần)
+- Đã xong: `pytest.ini` (`testpaths = tests deploy/terraform`, `pythonpath = .`), xóa file/tài liệu thừa trong các giai đoạn trước, gộp nhánh tài liệu failover tự động về một nguồn.
+- Chưa làm, cần chủ repo quyết định: ảnh tạm chưa track (`debug/`, `errors_fix/`, `images_testing/`, `images/ref*`, `images/image.png`, bản `-legacy` của sơ đồ); tài liệu bạn đã xóa (`HUONG_DAN_29_...`, `GOI_Y_CHON_DE_TAI`, `PHAN_TICH_DE_TAI_29`) và `experiments/` đang ở trạng thái xóa chưa commit; `docs/mota.md`; sơ đồ kiến trúc (`images/ARCHITECTURE.md`, `scripts/architecture_diagram.py`, `scripts/build_multicloud_diagram.py`) vẫn mô tả Step Functions/`/health/ready` cũ.
+- Cố ý giữ: mật khẩu demo trong Compose/script local (đã ghi rõ chỉ dành cho local); tên database/user `taskflow` (đổi sẽ ảnh hưởng volume hiện có); các cờ `enable_*` theo từng lượt apply.
 
 ## 6. Việc chưa quyết
 
