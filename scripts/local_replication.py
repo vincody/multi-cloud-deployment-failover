@@ -10,6 +10,7 @@ import socket
 import subprocess
 import sys
 import time
+from datetime import datetime, timezone
 from uuid import uuid4
 
 import httpx
@@ -168,6 +169,18 @@ def phase(value, **fields):
     write_state(state)
 
 
+def mark(step, **detail):
+    """Append a UTC timestamp for one step; the timeline is what failover time is measured from."""
+    state = read_state()
+    entry = {"step": step, "at": datetime.now(timezone.utc).isoformat(timespec="milliseconds"), **detail}
+    write_state(state | {"timeline": state.get("timeline", []) + [entry]})
+
+
+def begin(operation):
+    write_state(read_state() | {"operation": operation, "timeline": []})
+    mark("start")
+
+
 def fence(cloud):
     compose("stop", SERVICES[cloud])
     container = compose("ps", "--all", "-q", SERVICES[cloud], capture=True).stdout.strip()
@@ -177,6 +190,7 @@ def fence(cloud):
     state = json.loads(info.stdout)[0]
     if state["State"]["Running"] or state["HostConfig"]["RestartPolicy"]["Name"] not in ("no", ""):
         raise RuntimeError(f"Database {cloud} chưa được cô lập; từ chối promote.")
+    mark(f"fenced-{cloud}")
 
 
 def gate(cloud, enabled):
@@ -188,7 +202,9 @@ def gate(cloud, enabled):
             bootstrap(db)
             db.execute("UPDATE app_control SET writes_enabled=%s WHERE singleton=TRUE", (enabled,))
             db.commit()
-            return db.execute("SELECT pg_current_wal_flush_lsn()::text AS lsn").fetchone()["lsn"]
+            lsn = db.execute("SELECT pg_current_wal_flush_lsn()::text AS lsn").fetchone()["lsn"]
+            mark(f"writes-{'enabled' if enabled else 'paused'}-{cloud}", lsn=lsn)
+            return lsn
         finally:
             db.execute("SELECT pg_advisory_unlock(%s,%s)", LOCK)
 
@@ -201,6 +217,7 @@ def wait_replay(cloud, target, timeout=30):
             if not row["standby"]:
                 raise RuntimeError(f"{cloud} không phải standby; không thể xác nhận đồng bộ.")
             if row["caught_up"]:
+                mark(f"replayed-{cloud}", lsn=target)
                 return
         time.sleep(.2)
     raise RuntimeError(f"{cloud} chưa replay đủ WAL; không đổi vai trò.")
@@ -215,7 +232,7 @@ def promote(cloud):
     gate(cloud, True)
 
 
-def verify_writer(cloud):
+def _check_writer(cloud):
     with connection(DB_PORTS[cloud]) as db:
         state = db.execute("SELECT pg_is_in_recovery() AS standby, writes_enabled FROM app_control WHERE singleton=TRUE").fetchone()
         if state["standby"] or not state["writes_enabled"]:
@@ -232,6 +249,11 @@ def verify_writer(cloud):
         raise RuntimeError(f"Web {cloud} không kết nối được; proxy vẫn bị khóa.")
     if response.status_code != 200 or response.json().get("writable") is not True:
         raise RuntimeError(f"Web {cloud} chưa sẵn sàng; proxy vẫn bị khóa.")
+
+
+def verify_writer(cloud):
+    _check_writer(cloud)
+    mark(f"verified-{cloud}")
 
 
 def _already_on_azure():
@@ -251,10 +273,13 @@ def _already_on_azure():
 
 def _take_over_on_azure():
     """Shared tail of failover and switchover: fence the old primary, promote, verify, route."""
+    with connection(AZURE_DB) as db:
+        mark("azure-received-lsn", lsn=db.execute("SELECT pg_last_wal_receive_lsn()::text AS lsn").fetchone()["lsn"])
     fence("aws")
     promote("azure")
     verify_writer("azure")
     phase("steady", writer="azure")
+    mark("done")
     print("Azure is now the writer; shared proxy routes to Azure.")
 
 
@@ -263,6 +288,7 @@ def failover():
     with operation_lock():
         if _already_on_azure():
             return
+        begin("failover")
         phase("switching-to-azure")
         try:
             try:
@@ -282,6 +308,7 @@ def switchover():
     with operation_lock():
         if _already_on_azure():
             return
+        begin("switchover")
         phase("switching-to-azure")
         try:
             try:
@@ -369,6 +396,7 @@ def finish_failback():
     if not follows("azure", "aws"):
         rebuild("azure", "aws")
     phase("steady", final_lsn=None)
+    mark("done")
     print("Failback complete: proxy routes to AWS; Azure is streaming standby again.")
 
 
@@ -393,6 +421,8 @@ def failback():
         # final_lsn is recorded once Azure is write-locked and AWS has caught up;
         # from then on only fence, promote and verify remain.
         resume = state["phase"] == "switching-to-aws" and state.get("final_lsn") is not None
+        if not resume:
+            begin("failback")
         try:
             if not resume:
                 if not is_standby("aws"):

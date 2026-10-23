@@ -78,7 +78,7 @@ Hai chế độ dùng chung 4 bước fence → promote → verify → route:
 - Rút gọn các nhánh "resume" của `failback`, thêm test cho trường hợp lệnh bị dừng giữa chừng.
 - Kiểm chứng: `scripts/check_local_lifecycle.py` (cần Docker).
 
-### GĐ B — Đo đạc
+### GĐ B — Đo đạc (đã xong, nhánh `revamp`; xem `docs/DO_DAC_FAILOVER.md`)
 - Ghi timestamp từng bước vào `state.json`: khóa ghi, replay xong, fence, promote, writer xác nhận.
 - Ghi LSN cuối Azure nhận so với LSN cuối AWS để tính RPO thực tế.
 - Thêm endpoint ghi nhẹ `POST /api/ping` (ghi một dòng có timestamp và nơi phục vụ) để probe ghi mỗi giây mà không làm bẩn danh sách issue. Phải đi qua cùng cơ chế khóa ghi/`guard_write` như API Issues để bị chặn đúng lúc standby hoặc đang chuyển đổi.

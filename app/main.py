@@ -14,6 +14,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 from app.issues import router as issues_router
+from app.ping import router as ping_router
 from database.role import router as database_router
 
 APP_DIR = Path(__file__).resolve().parent
@@ -140,5 +141,6 @@ async def metrics() -> Response:
 
 
 app.include_router(issues_router)
+app.include_router(ping_router)
 app.include_router(database_router)
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")

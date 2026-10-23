@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import threading
 import time
 from uuid import uuid4
 
@@ -14,6 +15,7 @@ os.environ.update(LOCAL_REPL_PROJECT="dcs29-cycle-" + uuid4().hex[:8], AWS_DB_PO
                   AWS_WEB_PORT="18080", AZURE_WEB_PORT="18081", PROXY_WEB_PORT="18090", LOCAL_REPL_DB_ONLY="0")
 from scripts import local_replication as demo
 from database.local_state import read_state
+from scripts import probe_failover as probe
 
 processes = []
 base = "http://127.0.0.1:18090"
@@ -131,14 +133,37 @@ try:
     assert not demo.role(demo.AWS_DB) and demo.role(demo.AZURE_DB)
     compare_issue(issue["id"])
     # Emergency path: AWS database killed with no warning, then a plain failover.
+    stop, rows = threading.Event(), []
+
+    def run_probe():
+        with httpx.Client(timeout=3, trust_env=False) as client:
+            seq = 0
+            while not stop.is_set():
+                rows.append(probe.tick(client, base, "check-run", seq))
+                seq += 1
+                stop.wait(.5)
+
+    thread = threading.Thread(target=run_probe)
+    thread.start()
+    time.sleep(2)
     demo.compose("kill", "database")
     demo.failover()
+    time.sleep(2)
+    stop.set()
+    thread.join()
+    summary = probe.summarize(rows, base, "check-run")
+    assert any(end for _, end, _ in probe.outages(rows, "write_status")), "probe saw no recovered write outage"
+    assert {"aws", "azure"} <= set(summary["served_by"]), summary["served_by"]
+    assert "error" not in summary["lost_writes"], summary["lost_writes"]
+    steps = [entry["step"] for entry in read_state()["timeline"]]
+    expected = ["start", "azure-received-lsn", "fenced-aws", "writes-enabled-azure", "verified-azure", "done"]
+    assert [s for s in steps if s in expected] == expected, steps
     assert request("GET", "/api/database/status", cloud="azure")["writable"]
     request("POST", path + "/comments", {"request_id": str(uuid4()), "author": "Azure", "body": "Sau khi AWS sập"}, "azure")
     demo.failback()
     request("GET", path, cloud="aws")
     compare_issue(issue["id"])
-    print("PASS: one URL, standby write rejection, unsafe setup blocked, proxy switches, AWS/Azure writes, retry, full data/history preservation, archived volumes, repeat cycle, resumed failback (two stop points), failover after AWS kill")
+    print("PASS: one URL, standby write rejection, unsafe setup blocked, proxy switches, AWS/Azure writes, retry, full data/history preservation, archived volumes, repeat cycle, resumed failback (two stop points), failover after AWS kill with live probe and timeline")
 finally:
     for process in reversed(processes):
         if process.poll() is None:
