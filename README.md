@@ -11,7 +11,7 @@
 - Bản nháp lưu trong trình duyệt, kiểm tra version khi sửa và mã yêu cầu chống ghi trùng khi retry.
 - CI kiểm thử với PostgreSQL, build image Linux AMD64, phát hành GHCR và kéo lại image để kiểm tra runtime.
 
-**Bản Issues với database hiện được kiểm chứng ở môi trường local.** Nhánh [Terraform tự động](docs/giai-doan/tu_dong/TRIEN_KHAI_BANG_TERRAFORM.md) đã có automation K3s, WireGuard, PostgreSQL AWS primary/Azure standby, app và HTTPS/renewal; cần chạy nghiệm thu trên hai VM thật. Đã bổ sung [GĐ6B failover tự động](docs/giai-doan/tu_dong/AUTOMATION_FAILOVER.md) bằng CloudWatch/EventBridge/Step Functions/Lambda và SSM Azure, mặc định tắt; chưa nghiệm thu trên cloud. Giám sát độc lập, rejoin và failback vẫn cần thực hiện theo runbook. Nhánh [thủ công](docs/giai-doan/thu_cong/README.md) mô tả cùng kiến trúc bằng Console/Portal.
+**Bản Issues với database hiện được kiểm chứng ở môi trường local.** Nhánh [Terraform tự động](docs/giai-doan/tu_dong/TRIEN_KHAI_BANG_TERRAFORM.md) đã có automation K3s, WireGuard, PostgreSQL AWS primary/Azure standby, app và HTTPS/renewal; cần chạy nghiệm thu trên hai VM thật. Đã bổ sung [failover tự động](docs/giai-doan/tu_dong/AUTOMATION_FAILOVER.md) bằng watcher chạy trên VM Azure (cần cả probe của Azure lẫn Route 53 xác nhận AWS sập, fence rồi mới promote), mặc định tắt; chưa nghiệm thu trên cloud. Giám sát độc lập, rejoin và failback vẫn cần thực hiện theo runbook. Nhánh [thủ công](docs/giai-doan/thu_cong/README.md) mô tả cùng kiến trúc bằng Console/Portal.
 
 ## Chạy demo local
 

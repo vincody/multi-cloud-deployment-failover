@@ -4,7 +4,7 @@
 
 **Mục tiêu:** cả hai VM có HTTPS hợp lệ cho hostname origin riêng và hostname chung `app.YOUR_DOMAIN` trước khi GĐ6 tạo DNS failover. AWS dùng IAM role cho Certbot DNS-01; Azure dùng credential DNS giới hạn quyền, lưu ngoài repo. Không chép certificate/private key giữa hai cloud.
 
-Nếu tạm nghỉ giữa GĐ5/GĐ6, có thể stop hai VM; khi bật lại, xác nhận writer, phê duyệt startup guard theo hướng dẫn VM rồi kiểm tra Elastic IP/Static Public IP, pods và certificate. Nếu đã bật GĐ6B, disable rule và đợi mọi execution/SSM command terminal trước bảo trì; chỉ bật lại sau baseline/OK và rearm nếu có incident. VM tắt thì cả ứng dụng lẫn renewal không chạy. [AWS EC2 lifecycle](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-instance-lifecycle.html) · [Azure VM billing](https://learn.microsoft.com/en-us/azure/virtual-machines/states-billing).
+Nếu tạm nghỉ giữa GĐ5/GĐ6, có thể stop hai VM; khi bật lại, xác nhận writer, phê duyệt startup guard theo hướng dẫn VM rồi kiểm tra Elastic IP/Static Public IP, pods và certificate. Nếu đã cài watcher, tạo `/opt/dcs29/watcher.pause` trên VM Azure trước bảo trì; chỉ xóa file sau khi baseline khỏe và đã xóa marker incident cũ nếu có. VM tắt thì cả ứng dụng lẫn renewal không chạy. [AWS EC2 lifecycle](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-instance-lifecycle.html) · [Azure VM billing](https://learn.microsoft.com/en-us/azure/virtual-machines/states-billing).
 
 ## Đọc nhanh trước khi triển khai
 

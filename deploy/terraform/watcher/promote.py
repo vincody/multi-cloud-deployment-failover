@@ -43,7 +43,7 @@ def execute(phase, owner):
                 raise RuntimeError('Azure has not replayed all received WAL')
             time.sleep(1)
     if phase == 'promote':
-        # Receipt before mutation makes a retried SSM command safe for this incident.
+        # Receipt before mutation makes a retried promote safe for this incident.
         if not previous:
             fd = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             with os.fdopen(fd, 'w') as stream:

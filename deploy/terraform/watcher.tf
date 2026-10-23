@@ -24,8 +24,9 @@ variable "watcher_interval_seconds" {
 
 # The access key is created outside Terraform so the secret never enters state.
 resource "aws_iam_user" "azure_watcher" {
-  count = var.enable_auto_failover ? 1 : 0
-  name  = "dcs29-azure-watcher"
+  count         = var.enable_auto_failover ? 1 : 0
+  name          = "dcs29-azure-watcher"
+  force_destroy = true # deletes the externally created access key on destroy
 }
 
 locals {

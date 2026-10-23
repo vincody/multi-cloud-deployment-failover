@@ -24,7 +24,7 @@ Một writer: ban đầu AWS primary, Azure standby. Pod app lỗi thì K3s hồ
 - SSH: kiểm tra/chuyển role PostgreSQL và Kubernetes.
 - PowerShell laptop: probe shared hostname, DNS, identity và dữ liệu.
 
-Runbook này là GĐ6A, thực hiện thủ công trước. Sau diễn tập và trở về AWS primary/Azure standby, có thể tạo [controller tự động GĐ6B bằng Console](GIAI_DOAN_06B_FAILOVER_TU_DONG.md). Nếu đã bật controller, Disable EventBridge rule và xác nhận execution/SSM command đã terminal trước chạy chuyển role thủ công; không promote tay song song với workflow.
+Runbook này là GĐ6A, thực hiện thủ công trước. Sau diễn tập và trở về AWS primary/Azure standby, có thể bật [watcher failover tự động](../tu_dong/AUTOMATION_FAILOVER.md) bằng nhánh Terraform. Nếu đã cài watcher, tạo `/opt/dcs29/watcher.pause` trên VM Azure trước khi chạy chuyển role thủ công; không promote tay song song với watcher.
 
 ## 2. LAPTOP — kiểm tra đầu vào
 
@@ -389,7 +389,7 @@ Không apply lại `postgres-before-rejoin-<UTC>.yaml`: nó trỏ dữ liệu c�
 
 ### 8.4. Failback
 
-Nếu có GĐ6B, rule vẫn Disabled và mọi execution/SSM command phải terminal. Sau AWS standby đã bắt kịp, chạy drain/gate/WAL mục 4.1 **trên Azure primary**, so replay AWS. Stop Azure VM và đợi Stopped/Deallocated đúng máy. Promote AWS, mở gate theo mục 4.3; kiểm tra shared URL ghi được và Route 53 chọn AWS. Cuối cùng rejoin Azure bằng các bước 8.1–8.3 với source AWS `10.200.29.1`, PVC mới. Không init schema lần nữa.
+Nếu đã cài watcher, giữ file `watcher.pause` trong suốt bước này. Sau AWS standby đã bắt kịp, chạy drain/gate/WAL mục 4.1 **trên Azure primary**, so replay AWS. Stop Azure VM và đợi Stopped/Deallocated đúng máy. Promote AWS, mở gate theo mục 4.3; kiểm tra shared URL ghi được và Route 53 chọn AWS. Cuối cùng rejoin Azure bằng các bước 8.1–8.3 với source AWS `10.200.29.1`, PVC mới. Không init schema lần nữa.
 
 Nguồn: [K3s server flags, disable-agent](https://docs.k3s.io/cli/server), [pg_basebackup](https://www.postgresql.org/docs/17/app-pgbasebackup.html). Đây là runbook demo cần thử trên VM trước buổi đo; không phải hệ thống tự động recovery đã nghiệm thu.
 

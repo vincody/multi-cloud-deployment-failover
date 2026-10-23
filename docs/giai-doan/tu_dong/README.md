@@ -1,7 +1,7 @@
 # Triển khai tự động
 
 - [Triển khai bằng Terraform và các bước tiếp theo](TRIEN_KHAI_BANG_TERRAFORM.md): chuẩn bị, plan/apply, kiểm tra automation, HTTPS, DNS, failover/failback và monitoring; các bước cấu hình giữ ngay trong tài liệu.
-- [Failover tự động GĐ6B](AUTOMATION_FAILOVER.md): CloudWatch/EventBridge/Step Functions/Lambda, SSM Azure, fencing và rearm; cấu hình cũng nằm ngay trong hướng dẫn triển khai.
+- [Failover tự động GĐ6B](AUTOMATION_FAILOVER.md): watcher trên VM Azure, hai nguồn xác nhận, fencing trước promote, quyền IAM hẹp và vận hành.
 - [Chi tiết automation HTTPS](AUTOMATION_HTTPS.md): credential, DNS, cấp certificate, Ingress, renewal và retry.
 - [Chi tiết automation WireGuard, PostgreSQL và Issues](AUTOMATION_WIREGUARD_POSTGRESQL_APP.md): trình tự, file/cấu hình, credential, retry, giới hạn và kiểm thử.
 

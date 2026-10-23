@@ -36,7 +36,6 @@ AWS/Azure có trang tổng quan và trang thao tác chi tiết. Khi triển khai
 | [GĐ4](GIAI_DOAN_04_AZURE_PORTAL.md) | B2s, K3s, mạng riêng, PostgreSQL và app hai bên | Azure standby nhận đủ dữ liệu, AWS phục vụ ghi |
 | [GĐ5](GIAI_DOAN_05_DOMAIN_VA_HTTPS.md) | Ingress, domain, HTTPS | Cùng hostname/TLS dùng được trên hai origin |
 | [GĐ6](GIAI_DOAN_06_ROUTE53_FAILOVER.md) | Fencing, promote, DNS, rejoin, failback | Một writer; chuyển tuyến sau DB mới sẵn sàng |
-| [GĐ6B](GIAI_DOAN_06B_FAILOVER_TU_DONG.md) | Console: CloudWatch/EventBridge/Step Functions/Lambda và SSM Azure | Tùy chọn sau GĐ6; tự fence/promote AWS → Azure, failback thủ công |
 | [GĐ7](GIAI_DOAN_07_OBSERVABILITY.md) | Monitor ngoài hai VM, pods và replication | Thực hiện sau triển khai VM; pod/scale/recovery hiện đúng |
 | [GĐ8](GIAI_DOAN_08_KIEM_THU_FAILOVER.md) | Lỗi pod/VM/mạng, đo RTO/RPO | Có bằng chứng dữ liệu và số đo cloud |
 
@@ -46,7 +45,7 @@ Bắt đầu tại [bảng thông số](THONG_SO_TRIEN_KHAI.md). Lượt 1: làm
 
 - Có sẵn: ứng dụng, image, schema SQL, role check, replication và điều phối chuyển đổi **local**.
 - Hướng dẫn cấu hình tại chỗ: WireGuard, PostgreSQL/PVC/EndpointSlice, Secret/app/schema, standby, Ingress/TLS, startup guard và rejoin. Người triển khai tạo file theo mẫu, thay key/IP/digest và nghiệm thu trên VM.
-- Có code điều phối cloud và hướng dẫn tạo controller bằng Console tại GĐ6B; chưa nghiệm thu trên cloud. Kết quả local không thay kiểm chứng IAM/SSM/EventBridge trên hai VM.
+- Failover tự động chỉ có ở nhánh [Terraform](../tu_dong/AUTOMATION_FAILOVER.md) (watcher trên VM Azure); nhánh thủ công dừng ở failover có kiểm soát bằng lệnh (GĐ6). Chưa nghiệm thu trên cloud.
 - Script local và proxy 8090 dùng Compose/state trên một máy; không chạy nguyên xi trên hai VM.
 - PVC local không replicate xuyên cloud. K3s restart pod không tự promote DB hoặc chuyển người dùng sang cloud kia.
 - Các trang GĐ1–GĐ8 giữ hướng dẫn chi tiết tại chỗ: Console/Portal, SSH, lệnh, cấu hình, kiểm tra và xử lý lỗi đã chỉnh theo Issues/K3s. Terraform hiện có chưa nghiệm thu cho K3s/Issues database.
@@ -60,7 +59,6 @@ Nguồn: [K3s single-node](https://docs.k3s.io/quick-start), [PostgreSQL replica
 - [AWS Console: từng bước VPC/SG/key/EC2/EIP/SSH/K3s](GIAI_DOAN_03_AWS_CONSOLE.md)
 - [Azure Portal: từng bước quota/RG/VM/NSG/SSH/K3s](GIAI_DOAN_04_AZURE_PORTAL.md)
 - [Domain/IAM/DNS-01/Certbot, Ingress TLS và renewal chi tiết](GIAI_DOAN_05_DOMAIN_VA_HTTPS.md)
-- [GĐ6B: tạo CloudWatch Alarm, EventBridge, Step Functions/Lambda, IAM và SSM Azure bằng Console](GIAI_DOAN_06B_FAILOVER_TU_DONG.md)
 - [Prometheus/Grafana, panel, tunnel metrics và pod/scale](GIAI_DOAN_07_OBSERVABILITY.md)
 
 Mục nào phụ thuộc manifest DB/mạng riêng chưa triển khai đều ghi điểm dừng; không đánh dấu cloud đã pass trước khi thực hiện trên VM.
@@ -68,7 +66,7 @@ Mục nào phụ thuộc manifest DB/mạng riêng chưa triển khai đều ghi
 ## Các phần đã bổ sung sau rà soát
 
 - AWS Console/Azure Portal: WireGuard key/peer/firewall, PostgreSQL config/PVC/StatefulSet/EndpointSlice, Secret/DSN, startup guard, backup và log limits.
-- GĐ6B: đầy đủ cấu hình Console, agent Azure, đóng gói Lambda với marker nghiệm thu riêng, vận hành và rearm; không cần Terraform.
+- Failover tự động: xem nhánh [Terraform](../tu_dong/AUTOMATION_FAILOVER.md); không còn hướng dẫn tạo controller bằng Console.
 - GĐ6: rejoin trên PVC mới, giữ storage cũ, start server không agent trước khi chuyển manifest, failback sau đồng bộ.
 - GĐ7: node exporter, PostgreSQL textfile collector và PromQL cho role/streaming/WAL lag.
 - GĐ8: probe CSV chạy trên PowerShell và phạm vi đo workload Issues.

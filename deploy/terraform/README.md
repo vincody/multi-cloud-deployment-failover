@@ -9,7 +9,7 @@ Thư mục này tạo lại hạ tầng của [lộ trình GĐ3–GĐ6](../../do
 | GĐ3 AWS | VPC, public subnet, Internet Gateway, route table, security group, SSH key pair từ **public key**, EC2 Ubuntu 24.04 x86-64, EBS mã hóa, Elastic IP |
 | GĐ4 Azure | Resource Group `dcs29-rg`, VNet/subnet, NSG, Standard Static Public IP, NIC, Ubuntu 24.04 x86-64 VM và disk; gắn cùng SSH public key vào tài khoản quản trị |
 | GĐ5 DNS/TLS | Route 53 zone/A records/IAM; khi `enable_https=true` tự cấp certificate, TLS Secret/Ingress, redirect và renewal (**không tạo access key**) |
-| GĐ6B tự động | Opt-in `enable_auto_failover`: CloudWatch/EventBridge/Step Functions/Lambda, DynamoDB latch, SSM hybrid Azure; chỉ bật sau diễn tập thủ công |
+| GĐ6B tự động | Opt-in `enable_auto_failover`: watcher trên VM Azure và IAM user quyền hẹp (describe/stop EC2, đọc health check); chỉ bật sau diễn tập thủ công |
 | GĐ6 failover | Hai HTTPS health check khi `enable_health_checks = true`; cặp CNAME `app` primary/secondary khi `enable_failover = true` |
 
 VM mới cài hai cụm K3s độc lập bằng cùng `k3s_version`. Khi `enable_workload_automation=true` (mặc định), `terraform_data.workloads` dùng Python/OpenSSH từ laptop để tạo WireGuard, PostgreSQL 17/PVC/Secret, bootstrap schema trên AWS, clone standby Azure, triển khai Issues cùng GHCR digest và HTTP Ingress. Apply chỉ hoàn tất sau kiểm tra role, streaming, cùng commit và issue mẫu đã replay sang Azure. UDP 51820 chỉ mở từ IP peer; không mở 5432/6443/metrics ra Internet.
@@ -329,7 +329,7 @@ Plan lần này chỉ nên thêm **hai CNAME failover `app`**. Kiểm tra DNS au
 
 ## 6. Failover tự động GĐ6B (lượt apply thứ năm)
 
-Sau diễn tập fencing/promote/rejoin/failback thủ công, trở về AWS primary/Azure standby streaming rồi giữ bốn flag workload/HTTPS/health check/DNS bật và thêm `enable_auto_failover=true`. AWS CLI phải cùng account Terraform, có quyền SSM hybrid activation/registration/Parameter Store và PassRole cho `dcs29-azure-ssm`.
+Sau diễn tập fencing/promote/rejoin/failback thủ công, trở về AWS primary/Azure standby streaming rồi giữ bốn flag workload/HTTPS/health check/DNS bật và thêm `enable_auto_failover=true`. Lần apply đầu chỉ tạo IAM user `dcs29-azure-watcher`; tạo access key ngoài Terraform, lưu vào file INI riêng, đặt `azure_watcher_credentials_file` rồi apply lại để cài watcher.
 
 ```powershell
 terraform init
@@ -338,17 +338,18 @@ terraform test
 terraform plan -out=auto-failover.tfplan
 terraform apply auto-failover.tfplan
 terraform output auto_failover
+terraform output azure_watcher_iam_user
 ```
 
-Đọc plan trước apply; không replace VM/disk/PVC. Bootstrap đăng ký SSM Azure và kiểm tra Online; controller ở us-east-1 tự xác minh sự cố, chờ EC2 stopped rồi mới promote Azure. Nếu API EC2 không xác nhận được fencing, workflow dừng. Route 53 chọn writer sau readiness; async replication vẫn có thể mất WAL chưa truyền. Failback/rejoin không tự chạy.
+Đọc plan trước apply; không replace VM/disk/PVC. Bước cài đặt kiểm tra Azure là standby streaming, copy watcher, chạy `--check` rồi bật dịch vụ `dcs29-watcher`. Watcher chỉ failover khi probe của Azure và Route 53 cùng báo AWS sập N lần liên tiếp, chờ EC2 `stopped` rồi mới promote Azure. Nếu không xác nhận được fencing, watcher dừng và thoát mã 2. Route 53 chọn writer sau readiness; async replication vẫn có thể mất WAL chưa truyền. Failback/rejoin không tự chạy.
 
-Các bước quyền, Console verification, demo, tắt trigger khi bảo trì, kiểm tra command và rearm được ghi đầy đủ ngay ở **mục 9.2** của [hướng dẫn Terraform](../../docs/giai-doan/tu_dong/TRIEN_KHAI_BANG_TERRAFORM.md). `enable_auto_failover=false` gỡ control resources, không phải nút pause; dùng EventBridge disable-rule khi bảo trì. Chưa nghiệm thu workflow trên cloud.
+Cơ chế và vận hành: [Failover tự động bằng watcher](../../docs/giai-doan/tu_dong/AUTOMATION_FAILOVER.md); diễn tập, bảo trì và rearm: **mục 9.2** của [hướng dẫn Terraform](../../docs/giai-doan/tu_dong/TRIEN_KHAI_BANG_TERRAFORM.md). `enable_auto_failover=false` gỡ IAM user và không dừng dịch vụ trên VM; tạm dừng bằng `/opt/dcs29/watcher.pause`. Chưa nghiệm thu trên cloud.
 
 ## Cập nhật image, dọn lab và lưu state
 
 - Với automation bật và AWS primary/Azure standby, đổi `image_digest` rồi plan/apply sẽ triển khai app mới trên cả hai cụm và kiểm chứng dữ liệu/commit; không tạo lại VM. Không dùng initial automation khi writer đã đổi sau failover. Nâng K3s hoặc migration schema cần quy trình riêng và sao lưu trước; chỉnh `k3s_version` không tự nâng VM đã tồn tại.
 - DNS không fence/promote database. Thực hiện [GĐ6](../../docs/giai-doan/thu_cong/GIAI_DOAN_06_ROUTE53_FAILOVER.md) đúng thứ tự: chặn ghi/drain, đợi WAL nếu planned, fence, promote, rồi kiểm tra writer health. Route 53 có thể trả endpoint khi cả hai unhealthy; không xem DNS là khóa bảo vệ một writer.
-- Nếu bật GĐ6B, disable rule và xác nhận workflow/SSM commands đã terminal trước maintenance/destroy; deregister đúng Azure hybrid node và xóa `/dcs29/dr/azure-node` theo mục 9.2 của hướng dẫn đầy đủ. Không Start writer AWS cũ.
+- Nếu bật GĐ6B, tạo `watcher.pause` trước maintenance và `systemctl disable --now dcs29-watcher` trước destroy (mục 9.2 của hướng dẫn đầy đủ). Không Start writer AWS cũ.
 - Trước destroy sao lưu dữ liệu PostgreSQL ra ngoài VM: PVC local-path trên OS disk không tồn tại sau xóa VM/disk.
 - Trước khi dọn, lưu kết quả GĐ8, xóa **access key tạo thủ công** của IAM user `dcs29-azure-certbot`; nếu còn key, AWS sẽ từ chối xóa user do Terraform quản lý. Đưa nameserver tại registrar về nơi bạn muốn dùng sau lab. Sau đó xem `terraform plan -destroy` và chạy `terraform destroy` trong đúng workspace/state. Terraform chỉ xóa tài nguyên trong state, không xóa domain đã đăng ký hoặc image GHCR. Nếu zone có record do bạn tạo thủ công ngoài Terraform, xử lý chúng trước khi destroy.
 - Stop VM không tương đương `destroy`: disk, static/public IP, Route 53 hosted zone và health checks vẫn có thể phát sinh phí. Giữ state an toàn cho lần `apply`/`destroy` tiếp theo.

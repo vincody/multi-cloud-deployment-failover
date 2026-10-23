@@ -86,12 +86,12 @@ Hai chế độ dùng chung 4 bước fence → promote → verify → route:
 - Script probe chạy từ laptop: gọi `/version` và `POST /api/ping` mỗi giây, xuất CSV (detection time, downtime, tỷ lệ lỗi, latency).
 - Bảng cost proxy từ cấu hình Terraform (VM, disk, DNS).
 
-### GĐ C — Watcher (bản local đã xong, nhánh `revamp`; bản cloud làm cùng GĐ D)
+### GĐ C — Watcher (đã xong, nhánh `revamp`; bản cloud chưa nghiệm thu trên cloud thật)
 - Viết watcher dùng chung code với `failover`.
 - Thử local bằng cách dừng container AWS.
 - Thử các ca "không chắc": chỉ một bên lỗi, không fence được, AWS sống lại sau failover.
 
-### GĐ D — Thay nhánh failover tự động trên cloud
+### GĐ D — Thay nhánh failover tự động trên cloud (đã xong, nhánh `revamp`)
 - Triển khai watcher lên VM Azure qua Terraform/automation hiện có.
 - Gỡ `deploy/terraform/failover.tf`, `failover/lambda/`, `workflow.json.tmpl`, `enable_auto_failover` và `AUTOMATION_FAILOVER.md`, GĐ6B thủ công.
 - Làm trong **một commit riêng** để có thể khôi phục.

@@ -27,7 +27,7 @@
 - Budget và cleanup owner được xác nhận.
 - Run manifest ghi commit, digest, TTL, health interval/threshold, replica, client DNS mode và tải; ghi chế độ **manual GĐ6A** hoặc **automatic GĐ6B**. Không trộn hai chế độ trong cùng nhóm số đo.
 
-Không thay đổi image/TTL/replica giữa các lượt so sánh. Trong run manual/B0/F1 hoặc khi bảo trì, Disable EventBridge rule và xác nhận mọi execution/SSM command terminal. Trong run automatic F2/F4, kiểm tra SSM Online, baseline AWS primary/Azure standby streaming, latch/receipt đã rearm đúng quy trình, alarm OK rồi Enable rule; không promote tay song song. Khi kết thúc lỗi, Disable rule trước rejoin/failback, xác nhận command terminal, rồi rearm theo GĐ6B cho lượt tiếp theo.
+Không thay đổi image/TTL/replica giữa các lượt so sánh. Trong run manual/B0/F1 hoặc khi bảo trì, tạo `watcher.pause` trên VM Azure nếu watcher đang chạy. Trong run automatic F2/F4, kiểm tra `systemctl status dcs29-watcher` active, baseline AWS primary/Azure standby streaming, đã xóa `failover-incident.json` của lượt trước; không promote tay song song. Khi kết thúc lỗi, tạo lại `watcher.pause` trước rejoin/failback, rồi rearm cho lượt tiếp theo.
 
 ## 2. Workload Issues và kiểm chứng dữ liệu
 
@@ -172,7 +172,7 @@ F2 là bằng chứng chính; F5 không thay thế F2. Mỗi scenario tối thi�
 6. Ghi UTC gửi lệnh stop EC2 (`t_action`).
 7. Ghi external origin down (`t0`).
 8. Ghi Route 53 unhealthy (`t_detect`).
-9. Xác nhận EC2 stopped trước promote. Run manual làm theo GĐ6A; run automatic theo dõi workflow/SSM, không promote bằng tay. Xác nhận Azure writer readiness; ghi response Azure đầu tiên qua shared domain (t_first_B) và giao dịch ghi đầu tiên.
+9. Xác nhận EC2 stopped trước promote. Run manual làm theo GĐ6A; run automatic theo dõi `journalctl -u dcs29-watcher`, không promote bằng tay. Xác nhận Azure writer readiness; ghi response Azure đầu tiên qua shared domain (t_first_B) và giao dịch ghi đầu tiên.
 10. Ghi 10 success liên tiếp (`t_stable`).
 11. Tiếp tục đo Azure ổn định.
 12. AWS trở lại trong trạng thái chặn primary cũ; rejoin, chờ dữ liệu/WAL rồi failback có kiểm soát theo GĐ6.
@@ -186,7 +186,7 @@ Lệnh stop/start chỉ dùng đúng instance lab đã xác minh bằng describe
 Mỗi run lưu:
 
 - `manifest.yaml`: scenario/config/digest/TTL, controller_mode, alarm period/evaluation và rule state.
-- Nếu automatic: execution ARN/state timeline, SSM command IDs/results, latch owner, UTC ALARM và xác nhận EC2 stopped trước promote.
+- Nếu automatic: log `journalctl -u dcs29-watcher` (phát hiện, fence, promote), `failover-incident.json` và xác nhận EC2 stopped trước promote.
 - `incident.csv`: event và UTC.
 - `probe.csv`.
 - `k6.json` hoặc summary.
@@ -198,7 +198,7 @@ Raw data là bất biến; tạo file tổng hợp riêng. Không chỉnh raw CS
 
 ## 11. Cleanup sau thí nghiệm
 
-Export evidence trước. Nếu có GĐ6B, Disable rule, đợi execution/SSM command terminal rồi dọn controller/SSM/IAM theo GĐ6B mục 11; không để trigger chạy trong lúc xóa VM. Dừng/xóa đúng resources theo inventory: EC2, EBS nếu không cần, Elastic IP/public IPv4, Route 53 checks/records, Azure VM/managed disk/NIC/Public IP/Resource Group, log retention. Không xóa hosted zone/domain/tài nguyên dùng chung nếu chưa xác nhận.
+Export evidence trước. Nếu đã cài watcher, `sudo systemctl disable --now dcs29-watcher` trước khi xóa VM (mục 9.2 bước 6 của hướng dẫn Terraform); không để dịch vụ chạy trong lúc xóa VM. Dừng/xóa đúng resources theo inventory: EC2, EBS nếu không cần, Elastic IP/public IPv4, Route 53 checks/records, Azure VM/managed disk/NIC/Public IP/Resource Group, log retention. Không xóa hosted zone/domain/tài nguyên dùng chung nếu chưa xác nhận.
 
 ## 12. Checklist nghiệm thu
 
@@ -212,7 +212,7 @@ Export evidence trước. Nếu có GĐ6B, Disable rule, đợi execution/SSM co
 - [ ] Có DNS authoritative vs recursive evidence.
 - [ ] Có cost proxy.
 - [ ] Phân tích outlier/limitations.
-- [ ] Có runbook recovery/cleanup; run automatic có workflow/SSM evidence và rearm giữa các lượt.
+- [ ] Có runbook recovery/cleanup; run automatic có log watcher và rearm giữa các lượt.
 - [ ] Có video hoặc dữ liệu dự phòng cho demo.
 
 ## 14. Kiểm chứng storage và giới hạn

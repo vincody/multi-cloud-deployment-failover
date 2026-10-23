@@ -37,7 +37,7 @@ Terraform tạo hai VM/K3s, WireGuard, PostgreSQL primary/standby, schema và ap
 | Mạng database | WireGuard `10.200.29.1`/`.2`, UDP 51820 chỉ từ IP peer; PostgreSQL không mở Internet | Automation kiểm chứng bằng clone/streaming; không cấu hình lại tunnel |
 | DNS và quyền TLS | Hosted zone, A record, IAM; Certbot/TLS/Ingress/renewal khi bật `enable_https` | Delegate domain, chuẩn bị key DNS Azure và bật HTTPS |
 | DNS failover | Tạo health check và CNAME khi bật biến tương ứng | Kiểm chứng writer readiness và quy trình chuyển database trước |
-| Failover tự động GĐ6B | CloudWatch → EventBridge → Step Functions/Lambda, SSM Azure và incident latch khi `enable_auto_failover=true` | Diễn tập GĐ6A trước; rejoin/failback/rearm vẫn thủ công |
+| Failover tự động GĐ6B | Watcher trên VM Azure và IAM user quyền hẹp khi `enable_auto_failover=true` | Tạo access key ngoài Terraform; diễn tập GĐ6A trước; rejoin/failback vẫn thủ công |
 | Giám sát | Chưa triển khai | Prometheus/Grafana ngoài hai VM; thu thập pod/database metrics |
 
 Hai VM chạy **hai cụm K3s độc lập**. PostgreSQL standby đồng bộ bằng WAL, không phải bằng việc dùng chung PVC.
@@ -343,7 +343,7 @@ Plan phải thêm đúng cặp CNAME failover. Không tạo lại health check/r
 
 **Chỉ khi diễn tập hoặc có sự cố — runbook thủ công**
 
-Các lệnh dưới thuộc **vận hành khi có sự cố hoặc diễn tập**, không phải bước cấu hình sau apply. Khi `enable_auto_failover=false`, fencing/promote thực hiện thủ công. GĐ6B ở mục 9.2 có thể tự fence AWS và promote Azure; rejoin/failback vẫn thủ công. Không chạy lệnh promote tay song song với workflow đang hoạt động.
+Các lệnh dưới thuộc **vận hành khi có sự cố hoặc diễn tập**, không phải bước cấu hình sau apply. Khi `enable_auto_failover=false`, fencing/promote thực hiện thủ công. GĐ6B ở mục 9.2 (watcher trên Azure) có thể tự fence AWS và promote Azure; rejoin/failback vẫn thủ công. Không chạy lệnh promote tay song song với watcher đang hoạt động.
 
 Chỉ thực hiện các lệnh chuyển role sau khi baseline và DNS phần 9 đã được cấu hình. Không promote trong lúc tạo health checks.
 
@@ -607,184 +607,58 @@ Giữ cấu hình Health check/record, UTC từng bước, WAL cutoff/replay, fe
 - [ ] Có recovery runbook cho thao tác dở và inventory DB cũ.
 
 
-### 9.2. GĐ6B — Failover tự động AWS → Azure
+### 9.2. GĐ6B — Failover tự động AWS → Azure (watcher)
 
-**Tùy chọn, sau GĐ6A — các bước bật controller và vận hành**
+Cơ chế, quyết định, quyền AWS và vận hành chi tiết nằm ở [Failover tự động bằng watcher](AUTOMATION_FAILOVER.md). Phần này chỉ gồm các bước triển khai và diễn tập.
 
-Mặc định `enable_auto_failover=false`. Chỉ bật sau khi hoàn tất GĐ6A và trở về baseline. Terraform triển khai bộ điều phối; không promote trong apply.
+#### 1. Trước khi bật
 
-#### 1. Phạm vi và trình tự
+1. Đã diễn tập GĐ6A (mục 9.1): fence, promote, rejoin và failback thủ công thành công, AWS lại là primary và Azure lại là standby streaming.
+2. Bốn cờ đã bật và đã apply: `enable_workload_automation`, `enable_https`, `enable_health_checks`, `enable_failover`.
+3. Tạo IAM user bằng Terraform (bước 2 bên dưới), rồi **tạo access key trong Console** cho user `dcs29-azure-watcher` và lưu thành file INI riêng, ngoài repo:
 
-| Bước | Thành phần | Điều kiện/hành động |
-|---|---|---|
-| 1 | Route 53 | Kiểm tra `/health/database` AWS; interval 30 giây, threshold 3 hiện có |
-| 2 | CloudWatch | `HealthCheckStatus < 1` trong 2 datapoint 60 giây; missing data không kích hoạt |
-| 3 | EventBridge | Chỉ nhận ALARM của alarm `dcs29-auto-failover`, bắt đầu workflow |
-| 4 | Lambda/DynamoDB | Ghi latch độc quyền cho incident; sự kiện trùng không tiếp tục |
-| 5 | Lambda | Alarm vẫn ALARM và probe độc lập xác nhận AWS không sẵn sàng; kiểm tra lại sau 20 giây |
-| 6 | SSM Azure | K3s đang chạy, PostgreSQL 17 là standby, replay không pause và đã replay WAL nhận được |
-| 7 | Lambda/EC2 | Yêu cầu Stop EC2, poll tới đúng trạng thái `stopped`; không dùng force-stop |
-| 8 | Lambda/SSM | Kiểm tra EC2 vẫn stopped, chạy promote trên Azure qua Run Command |
-| 9 | PostgreSQL | Ghi incident receipt trước promote, promote và mở writer gate, kiểm tra lại role |
-| 10 | Lambda | Public HTTPS Azure báo primary/writable và EC2 vẫn stopped |
-| 11 | Route 53 | Writer health Azure thành Healthy, DNS failover chọn Azure; client còn cache cần thời gian |
+   ```ini
+   [default]
+   aws_access_key_id = ...
+   aws_secret_access_key = ...
+   ```
 
-Step Functions thực hiện các bước chờ và polling hữu hạn, timeout toàn workflow 25 phút. Lambda không giữ SSH key, không kết nối 5432 public và không tự khởi động K3s bị guard. Gửi SSM command không tự retry khi chưa biết command trước đã thực thi chưa; promotion cùng incident có receipt để tránh promote lặp.
-
-#### 2. Region và quyền
-
-CloudWatch metric của Route 53 được đọc ở **us-east-1**, nên alarm, EventBridge, Step Functions, Lambda, latch và SSM Azure nằm ở đó. EC2 vẫn dùng `aws_region` của project (ví dụ ap-southeast-1). Control plane ở ngoài VM AWS; với region chính khác us-east-1, nó cũng ở khác Region.
-
-Đây là automation cho sự cố VM/app trong điều kiện API EC2 vẫn truy cập được. **Nếu cả Region AWS mất khả dụng và không thể xác nhận EC2 đã dừng, workflow dừng trước promote.** Nó không đảm bảo DR tự động toàn Region khi không còn bằng chứng fencing.
-
-Azure được đăng ký thành SSM hybrid/multicloud node; không cần Azure client secret hoặc SSH runtime từ Lambda. Agent gọi endpoint SSM/ssmmessages us-east-1 qua outbound HTTPS 443. Không mở thêm inbound 22/5432/6443 cho Lambda. Registration dùng activation một máy, hết hạn sau một giờ và được xóa sau đăng ký; activation code chỉ đi qua bộ nhớ/SSH stdin, không nằm trong Terraform state.
-
-User chạy Terraform cần AWS CLI đăng nhập đúng **cùng account Terraform** và thêm quyền (bao gồm `sts:GetCallerIdentity` để đối chiếu account):
-
-- Tạo IAM role/policy, Lambda, Step Functions, CloudWatch/EventBridge và DynamoDB trong us-east-1.
-- `ssm:CreateActivation`, `DeleteActivation`, `DescribeInstanceInformation`, `AddTagsToResource`, `PutParameter`.
-- `iam:PassRole` cho role `dcs29-azure-ssm` khi tạo activation.
-
-Lambda chỉ được Stop đúng EC2, gửi command đến SSM node gắn tag Project=dcs29/Purpose=azure-dr, đọc node parameter và quản lý incident của project. Lambda **không có DeleteItem để tự xóa latch**, không có StartInstances, không cập nhật DNS trực tiếp và không tự failback.
-
-#### 3. Trước khi bật
-
-Hoàn tất bốn lượt Terraform hạ tầng/app, HTTPS, health check, DNS. Làm GĐ6A: fencing/promote/rejoin/failback thủ công, rồi trả hệ thống về baseline:
-
-- AWS primary/writable, Azure standby/streaming, cùng app commit.
-- Hai public origin HTTPS hoạt động, startup guard có trên cả hai VM.
-- AWS writer health Healthy, Azure standby writer health Unhealthy là đúng.
-- Không còn diễn tập/command chuyển role đang chạy, có backup ngoài VM và inventory PVC active.
-
-Terraform không biết buổi diễn tập đã pass; bạn phải xác nhận thực tế trước bật flag. Bootstrap kiểm tra lại role/gate/streaming và guard trước khi đăng ký agent, nhưng không thay thế nghiệm thu fencing/rejoin.
-
-VM Azure có SSM registration/snap từ một hệ thống khác sẽ bị từ chối tự nhận; cần migration/adoption riêng. Không xóa agent identity để ép đăng ký lại. Trên VM mới của project, automation cài agent từ AWS và lưu marker `/opt/dcs29/ssm-dr.json` root-only.
-
-#### 4. Lượt apply GĐ6B
-
-Trong `deploy/terraform/terraform.tfvars` giữ các flag cũ và thêm:
-
-```hcl
-enable_workload_automation = true
-enable_https               = true
-enable_health_checks       = true
-enable_failover            = true
-enable_auto_failover       = true
-```
-
-Trên **PowerShell laptop**, thư mục `deploy/terraform`:
+#### 2. Apply
 
 ```powershell
-terraform init
-terraform fmt -check
-terraform validate
-terraform test
-terraform plan -out=auto-failover.tfplan
-# Đọc plan: thêm control resources/SSM; không replace VM, disk hoặc PVC active.
-terraform apply auto-failover.tfplan
-terraform output auto_failover
+# terraform.tfvars
+# enable_auto_failover           = true
+# azure_watcher_credentials_file = "C:/path/outside/repo/watcher-credentials.ini"
+terraform plan
+terraform apply
 ```
 
-`terraform init` bổ sung provider archive để đóng gói Lambda. Bootstrap dùng Python/OpenSSH và AWS CLI trên laptop; không cần boto3 trên laptop để triển khai. Code Lambda dùng SDK có sẵn trong runtime.
+Lần đầu apply chỉ tạo IAM user vì chưa có file key; tạo key rồi apply lại để cài watcher. Plan phải chỉ thêm `aws_iam_user`, `aws_iam_user_policy` và `terraform_data.watcher`; không replace VM, disk hay PVC. Bước cài đặt chạy trên laptop qua SSH: kiểm tra Azure là standby streaming, cài `python3-boto3`, copy ba tệp watcher, ghi cấu hình và credential, chạy `cloud_watcher.py --check`, rồi bật dịch vụ.
 
-Terraform tạo hybrid role, kiểm tra baseline, đăng ký/reuse agent Azure, chờ Online, gắn tag và ghi node ID vào Parameter Store Standard `/dcs29/dr/azure-node`. ID không phải credential. Resource `terraform_data.azure_ssm` không tự promote database trong apply. Sau đó tạo workflow/alarm/event target; từ thời điểm rule được bật, sự cố có thể tự dẫn tới Stop EC2/promote Azure.
-
-Trong **AWS Console**, chọn Region us-east-1:
-
-- Systems Manager → Managed nodes: `dcs29-azure-dr` Online.
-- Parameter Store: `/dcs29/dr/azure-node` trỏ đúng node Azure.
-- CloudWatch → Alarms: `dcs29-auto-failover` về OK sau đủ dữ liệu baseline.
-- EventBridge → Rules: `dcs29-auto-failover` Enabled, target là workflow.
-- Step Functions: state machine Standard `dcs29-auto-failover`, chưa có execution đang promote.
-
-#### 5. Diễn tập và kiểm chứng
-
-Bật monitoring/evidence trước. Khi đã cho phép gây sự cố, Stop đúng EC2 hoặc gây lỗi có kiểm soát; không promote Azure bằng tay song song với workflow. Theo dõi execution trên Step Functions:
-
-```powershell
-$WorkflowArn = terraform output -json auto_failover | ConvertFrom-Json | Select-Object -ExpandProperty workflow
-aws stepfunctions list-executions --state-machine-arn $WorkflowArn --region us-east-1
-```
-
-Sau completion, kiểm tra trên laptop, thay YOUR_DOMAIN thật:
-
-```powershell
-curl.exe --fail-with-body https://azure-origin.YOUR_DOMAIN/api/database/status
-curl.exe --fail-with-body https://azure-origin.YOUR_DOMAIN/health/database
-curl.exe --fail-with-body https://app.YOUR_DOMAIN/version
-curl.exe --fail-with-body https://app.YOUR_DOMAIN/api/issues
-```
-
-Azure primary/writable, EC2 stopped, shared URL về environment azure sau DNS cache; issue/comment/history đã replicate vẫn đọc được. Ghi giao dịch ACK và timeline/RTO/RPO theo GĐ8. AWS ALARM vẫn có thể tồn tại sau failover; latch chặn các incident trùng, không tự trả AWS về primary.
-
-Thời gian gồm health check, alarm 2×60 giây, xác minh, preflight, EC2 stop, SSM, health check Azure và cache DNS. Không coi interval 30 giây là RTO 30 giây. Async replication không đảm bảo dữ liệu cuối đã commit trên AWS đều đến Azure; chờ replay chỉ đảm bảo xử lý WAL **đã nhận**, không xác nhận WAL chưa truyền.
-
-#### 6. Lỗi, maintenance và failback
-
-Nếu AWS hồi phục, DNS/TLS probe không đáng tin, Azure offline/replay pause, không Stop được EC2 hoặc SSM trả kết quả lỗi: workflow dừng, giữ latch. Trường hợp command timeout, promotion có thể đã xảy ra trước khi trả kết quả; kiểm tra SSM invocation và role thực tế, không gửi promote mới mù quáng.
-
-Trước maintenance, rejoin hoặc failback, tắt **rule trigger**, không đặt `enable_auto_failover=false` chỉ để pause vì biến đó sẽ gỡ cả control resources:
-
-```powershell
-aws events disable-rule --name dcs29-auto-failover --region us-east-1
-aws stepfunctions list-executions --state-machine-arn $WorkflowArn --status-filter RUNNING --region us-east-1
-$AzureNode = aws ssm get-parameter --name /dcs29/dr/azure-node --query Parameter.Value --output text --region us-east-1
-aws ssm list-commands --instance-id $AzureNode --region us-east-1
-```
-
-Disable rule không hủy execution/SSM command đã bắt đầu. Không Start AWS primary cũ khi còn execution/command Pending/InProgress/Delayed/Cancelling hoặc chưa xác định role. Giữ AWS bị fence; rejoin/failback bằng mục 9.1 ở trên, không dùng initial workload automation để ghi đè PVC active sau rejoin.
-
-Sau toàn bộ command/execution cũ đã terminal và failback đã về AWS primary/Azure standby/streaming, mới rearm. Trong SSH Azure, chỉ xóa incident receipt khi database đã là standby; root file chứa owner ARN để đối chiếu:
+#### 3. Kiểm tra sau khi bật
 
 ```bash
-test "$(sudo k3s kubectl -n issues exec postgres-0 -- psql -U postgres -d issues -At -c 'SELECT pg_is_in_recovery()')" = t || exit 1
-sudo cat /opt/dcs29/failover-incident.json
-sudo rm -f /opt/dcs29/failover-incident.json
+sudo systemctl status dcs29-watcher
+sudo journalctl -u dcs29-watcher -n 20     # mỗi chu kỳ: web=True db=True verdict=healthy
 ```
 
-Không xóa marker khi Azure còn primary. Trên laptop, đọc latch bằng file JSON để tránh lỗi quoting trên Windows PowerShell:
+#### 4. Diễn tập
 
-```powershell
-$LatchKeyFile = Join-Path $env:TEMP 'dcs29-dr-latch-key.json'
-[IO.File]::WriteAllText($LatchKeyFile, '{"id":{"S":"writer"}}', [Text.UTF8Encoding]::new($false))
-$Incident = aws dynamodb get-item --table-name dcs29-dr-latch --key "file://$LatchKeyFile" --consistent-read --region us-east-1 | ConvertFrom-Json
-if ($LASTEXITCODE -ne 0 -or -not $Incident.Item.owner.S) { throw 'Không đọc được incident owner' }
-$Incident.Item
-```
+1. Bật monitoring (mục 10) và chạy `scripts/probe_failover.py` từ laptop tới `https://app.<domain>`.
+2. Ghi mốc UTC, rồi Stop đúng EC2 trong Console. Không promote Azure bằng tay song song với watcher.
+3. Theo dõi `journalctl -u dcs29-watcher -f`: phát hiện, fence (`stopped`), promote, Azure writable.
+4. Kiểm tra `/api/database/status` và `/health/database` của Azure, AWS vẫn Stopped, shared domain trả về Azure sau khi DNS cập nhật.
+5. Ghi detection time, failover time, downtime và số ghi bị mất theo [đo đạc failover](../../DO_DAC_FAILOVER.md). Thời gian trên cloud còn gồm chu kỳ health check Route 53 và TTL; không coi interval 30 giây là RTO 30 giây.
 
-Chỉ khi roles/SSM commands đã được xác minh, xóa đúng latch với điều kiện owner không đổi:
+#### 5. Lỗi, bảo trì và failback
 
-```powershell
-$OwnerFile = Join-Path $env:TEMP 'dcs29-dr-latch-owner.json'
-$OwnerJson = @{ ':owner' = @{ S = $Incident.Item.owner.S } } | ConvertTo-Json -Depth 4 -Compress
-[IO.File]::WriteAllText($OwnerFile, $OwnerJson, [Text.UTF8Encoding]::new($false))
-aws dynamodb delete-item --table-name dcs29-dr-latch --key "file://$LatchKeyFile" --condition-expression 'owner = :owner' --expression-attribute-values "file://$OwnerFile" --region us-east-1
-if ($LASTEXITCODE -ne 0) { throw 'Latch chưa được xóa; giữ rule disabled' }
-Remove-Item -LiteralPath $LatchKeyFile, $OwnerFile
-```
+- Watcher thoát với mã 2 (không tự thử lại): xem `journalctl`, xử lý nguyên nhân (EC2 không dừng được, replay chưa đủ, Azure không ghi được), rồi quyết định promote thủ công theo 9.1.
+- Bảo trì có kế hoạch (stop/reboot VM, thử lỗi pod, rejoin, failback): `sudo touch /opt/dcs29/watcher.pause` trước, xóa file sau khi xong.
+- Không Start lại AWS cũ sau failover. Rejoin và failback theo 9.1; sau khi AWS lại là primary và Azure lại là standby, xóa `/opt/dcs29/failover-incident.json` và `sudo systemctl restart dcs29-watcher` để cài lại.
 
-Kiểm tra CloudWatch alarm về OK trước bật lại rule:
+#### 6. Chi phí và dọn dẹp
 
-```powershell
-aws cloudwatch describe-alarms --alarm-names dcs29-auto-failover --query 'MetricAlarms[].StateValue' --region us-east-1
-aws events enable-rule --name dcs29-auto-failover --region us-east-1
-```
-
-Terraform có thể sửa drift Enabled/Disabled của rule ở apply sau; không apply trong lúc đang maintenance/rejoin. Latch không có TTL và không tự mở lại, kể cả khi workflow fail; đây là bước xác nhận thủ công để tránh tự động chạy incident mới trên topology sau failover chưa được phục hồi.
-
-#### 7. Chi phí và cleanup
-
-Ngoài CloudWatch/EventBridge/Lambda/Step Functions còn có DynamoDB on-demand (vài record/request incident) và SSM hybrid. Run Command trên Azure hiện tính 0,002 USD/invocation; workflow gửi preflight/promote, polling không phải gửi command mới. Logs Lambda giữ 7 ngày. Không có NAT Gateway, Lambda không gắn VPC. Chi phí thực tế còn phụ thuộc region, hạn mức miễn phí, logs và số retry; không đảm bảo tổng bằng 0.
-
-Khi dọn lab: disable rule, bảo đảm không còn execution/SSM command active, sao lưu DB/evidence. Deregister đúng hybrid node và xóa parameter do bootstrap tạo trước khi destroy:
-
-```powershell
-aws ssm deregister-managed-instance --instance-id $AzureNode --region us-east-1
-aws ssm delete-parameter --name /dcs29/dr/azure-node --region us-east-1
-```
-
-SSM identity/agent trong VM và parameter tạo qua bootstrap không tự rollback khi bỏ resource Terraform. Không deregister để retry khi VM vẫn đang phục vụ; phục hồi registration có kế hoạch. Destroy latch/workflow không khôi phục role database hay thay rejoin/failback.
-
+Watcher không tạo dịch vụ AWS tính phí theo giờ: chỉ có gọi API (`DescribeInstances`, `GetHealthCheckStatus`) mỗi chu kỳ, trong mức miễn phí hoặc không đáng kể, và health check Route 53 vốn đã có ở GĐ6. Khi dọn lab: `sudo systemctl disable --now dcs29-watcher` trên VM Azure, rồi `terraform destroy` (user và access key bị xóa nhờ `force_destroy`). Credential và tệp watcher trên VM sẽ mất khi VM bị hủy; nếu VM được giữ, xóa `/etc/dcs29/watcher-aws-credentials` thủ công.
 
 ## 10. Giám sát và nghiệm thu
 
@@ -1354,7 +1228,7 @@ Không đổi `postgres_image` để nâng major: automation chỉ chấp nhận
 
 Nếu đang ở trạng thái sau failover, không chạy lại automation initial deployment để cập nhật app; thực hiện cập nhật có kiểm soát theo role hiện tại và hoàn tất failback/rejoin trước.
 
-Nếu bật GĐ6B, trước bảo trì/update/rejoin/destroy hãy disable EventBridge rule, xác nhận mọi execution/SSM command đã terminal theo mục 9.2. Không dùng `enable_auto_failover=false` như nút pause. Khi dọn lab, deregister đúng hybrid node và xóa parameter theo mục 9.2 trước destroy.
+Nếu bật GĐ6B, trước bảo trì/update/rejoin/destroy hãy tạo `/opt/dcs29/watcher.pause` trên VM Azure (mục 9.2, bước 5). Không dùng `enable_auto_failover=false` như nút pause. Khi dọn lab, dừng dịch vụ watcher theo mục 9.2, bước 6 trước destroy.
 
 Trước dọn lab: export evidence, sao lưu PostgreSQL ra ngoài VM, xác định disk/PVC đang dùng. Xóa access key Certbot Azure đã tạo thủ công trước khi xóa IAM user; cập nhật nameserver tại registrar nếu không dùng zone nữa. Từ PowerShell laptop, ở `deploy/terraform`, xem kỹ danh sách tài nguyên sẽ bị xóa:
 
@@ -1454,7 +1328,7 @@ Lưu baseline:
 Save-DemoEvent 'baseline_verified'
 ```
 
-**Mở sẵn trên trình duyệt:** `$SharedUrl/issues.html`, `$AzureUrl/issues.html`, Grafana `http://localhost:3000` và Route 53 Health checks. Nếu demo tự động, mở thêm Step Functions ở us-east-1. Trong Grafana chọn khoảng thời gian 15–30 phút gần nhất và refresh phù hợp với scrape 10 giây. Trước sự cố, `probe_success{job="blackbox_https"}` của cả ba URL `/health/live` phải là 1; chỉ số này đo process/HTTPS, không chứng minh database ghi được.
+**Mở sẵn trên trình duyệt:** `$SharedUrl/issues.html`, `$AzureUrl/issues.html`, Grafana `http://localhost:3000` và Route 53 Health checks. Nếu demo tự động, mở thêm một terminal chạy `journalctl -u dcs29-watcher -f` trên VM Azure. Trong Grafana chọn khoảng thời gian 15–30 phút gần nhất và refresh phù hợp với scrape 10 giây. Trước sự cố, `probe_success{job="blackbox_https"}` của cả ba URL `/health/live` phải là 1; chỉ số này đo process/HTTPS, không chứng minh database ghi được.
 
 Không tiếp tục nếu baseline sai. Nếu VM vừa reboot, xử lý guard theo mục 7.3 chỉ khi biết chắc chưa có failover; nếu writer đã đổi, dùng mục 9.1 để recovery.
 
@@ -1573,10 +1447,10 @@ Dự kiến ban đầu các dòng status 200/environment aws. Mỗi vòng gồm 
 
 **B. Demo tự động (GĐ6B đã được nghiệm thu và bật)**
 
-1. Trước Stop, kiểm tra baseline, alarm OK, rule Enabled, SSM Online và đã rearm latch/incident theo mục 9.2 nếu có lượt cũ. Không bật tự động lần đầu ngay trước buổi trình bày.
+1. Trước Stop, kiểm tra baseline, `systemctl status dcs29-watcher` là active, không có `watcher.pause`, và đã xóa `failover-incident.json` theo mục 9.2 nếu có lượt cũ. Không bật tự động lần đầu ngay trước buổi trình bày.
 2. Thực hiện Stop đúng EC2 và ghi hai mốc thời gian như chế độ A.
-3. Theo dõi Step Functions và SSM theo mục 9.2, bước 5. **Không chạy lệnh promote/gate thủ công của chế độ A** trong khi controller còn hoạt động.
-4. Sau execution thành công, kiểm tra Azure `/api/database/status`, `/health/database`, AWS Stopped và shared domain. Nếu workflow lỗi/timeout, kiểm tra execution/SSM command và role thực tế theo mục 9.2, bước 6 trước thao tác khác; không suy đoán promotion chưa xảy ra.
+3. Theo dõi `journalctl -u dcs29-watcher -f` theo mục 9.2, bước 4. **Không chạy lệnh promote/gate thủ công của chế độ A** trong khi watcher còn hoạt động.
+4. Sau khi watcher báo Azure là writer, kiểm tra Azure `/api/database/status`, `/health/database`, AWS Stopped và shared domain. Nếu watcher thoát mã 2, kiểm tra `journalctl` và role thực tế theo mục 9.2, bước 5 trước thao tác khác; không suy đoán promotion chưa xảy ra.
 
 Ở cả hai chế độ, Grafana AWS process probe sẽ về 0; Azure process probe vẫn 1; shared có thể lỗi rồi về 1. Website giữ cùng URL. DNS/cache và thời gian điều phối có thể làm chuyển đổi mất vài phút; không coi 30 giây của health check là RTO.
 
@@ -1616,7 +1490,7 @@ Trên website chung tải lại issue, chỉ rõ bình luận trước/sau sự 
 
 Phần này cần nhiều thao tác; **diễn tập trước và dành thời gian riêng**, không bấm Start AWS rồi trông chờ DNS tự khôi phục dữ liệu.
 
-1. Nếu dùng tự động, làm mục 9.2, bước 6: disable EventBridge rule, xác nhận mọi execution/SSM command đã terminal. Không tiếp tục khi còn command đang chạy hoặc role chưa rõ. Không đổi flag Terraform để pause controller.
+1. Nếu dùng tự động, làm mục 9.2, bước 5: tạo `watcher.pause`. Không tiếp tục khi chưa rõ role thực tế của hai database. Không đổi flag Terraform để pause watcher.
 2. Ghi `Save-DemoEvent 'aws_rejoin_begin'`. AWS Console → Start đúng EC2 đã fence. Guard phải giữ K3s dừng; mở SSH AWS bằng `ssh -i $SshKey "ubuntu@$AwsIp"`. **Không touch marker phê duyệt restart lúc này.**
 3. Làm đầy đủ mục 9.1, bước **8.1–8.3 trên AWS**: xác minh primary cũ dừng → tạo PVC mới → clone từ Azure `10.200.29.2` → cập nhật manifest bằng K3s không agent → bật database/app sau khi workload đã trỏ storage mới. Dùng đúng PostgreSQL digest hiện tại. Các bước YAML/Python có sẵn ở mục đó; không bỏ qua hoặc apply manifest primary cũ.
 4. Trong phiên điều khiển laptop:
@@ -1652,14 +1526,14 @@ Phần này cần nhiều thao tác; **diễn tập trước và dành thời gi
 
 5. Start Azure với guard giữ K3s dừng; làm lại mục 9.1, bước **8.1–8.3 trên Azure**, source AWS `10.200.29.1`, PVC mới. Không bật lại PostgreSQL Azure primary trên storage cũ. Khi thao tác failback đã hoàn tất, Azure phải là standby streaming.
 6. Gửi một bình luận mới qua shared domain/website sau failback, xác nhận xuất hiện trên Azure. Dùng request ID mới cho **nội dung mới**; kiểm tra lại role, commit, ID/version/comments/history và chỉ một writer như bước 13.3.
-7. Nếu dùng tự động, chỉ rearm theo mục 9.2, bước 6 sau khi topology và commands đã được xác minh, alarm về OK. Nếu chưa định chạy lại tự động, giữ rule disabled và ghi trạng thái đó trong biên bản; không đánh dấu hệ thống sẵn sàng demo tự động.
+7. Nếu dùng tự động, chỉ rearm (xóa `failover-incident.json`, restart watcher) theo mục 9.2, bước 5 sau khi topology đã được xác minh. Nếu chưa định chạy lại tự động, giữ `watcher.pause` và ghi trạng thái đó trong biên bản; không đánh dấu hệ thống sẵn sàng demo tự động.
 
 **Kết quả hoàn thành:** AWS primary/writable, Azure standby/streaming/read-only; shared URL AWS; dữ liệu tạo trên Azure vẫn tồn tại trên cả hai bên; không có hai writer. AWS writer check Healthy, Azure writer check Unhealthy, còn ba process probes `/health/live` về 1.
 
 ### 13.10. Lưu bằng chứng và checklist trước buổi trình bày
 
 1. Ghi `Save-DemoEvent 'demo_cycle_complete'`, dừng probe bằng Ctrl+C. Giữ `incident.csv`, `probe.csv` và các file JSON. Lưu ảnh Grafana cả giai đoạn AWS → Azure → AWS, trạng thái fencing, writer health và issue/history. Không chụp Secret/credential.
-2. Nếu dùng GĐ6B, lưu execution ARN, trạng thái và mốc Step Functions/SSM. Ghi rõ chế độ thủ công hay tự động; không dùng kết quả thủ công để tuyên bố tự động đã pass.
+2. Nếu dùng GĐ6B, lưu log `journalctl -u dcs29-watcher` và timeline của lượt chạy. Ghi rõ chế độ thủ công hay tự động; không dùng kết quả thủ công để tuyên bố tự động đã pass.
 3. Trong timeline, phân biệt thời điểm Stop yêu cầu, VM Stopped, origin được quan sát lỗi, shared Azure và ACK ghi đầu tiên. CSV `/version` không tự chứng minh RPO; muốn báo RPO phải đối chiếu giao dịch ACK/receipt theo mục 10.2. Các bước demo này chứng minh dữ liệu mẫu, không thay phép đo tải hay tối thiểu ba lượt nghiệm thu.
 4. Sao chép thư mục bằng chứng khỏi thư mục tạm, export dashboard JSON và chuẩn bị video của một lượt thành công. Nếu cần dọn lab sau cùng, làm mục 12 sau khi sao lưu database; không destroy ngay trước buổi demo.
 
@@ -1669,11 +1543,11 @@ Trước buổi demo, kiểm tra:
 - [ ] HTTPS/shared URL hoạt động, health checks đúng vai trò.
 - [ ] Monitoring chạy trên laptop, đúng domain, Grafana có dữ liệu gần nhất.
 - [ ] SSH hai VM dùng được; đã diễn tập rejoin/failback với release K3s pin hiện tại.
-- [ ] Đã chọn một chế độ demo; controller/latch đúng trạng thái nếu dùng tự động.
+- [ ] Đã chọn một chế độ demo; watcher đúng trạng thái (active, không pause, không còn incident cũ) nếu dùng tự động.
 - [ ] Có bản sao lưu ngoài VM, đủ dung lượng PVC mới và bằng chứng/video dự phòng.
 - [ ] Laptop không sleep, mạng ổn định; không đổi cấu hình/image trong lúc trình bày.
 
-**Nếu demo dừng giữa chừng:** ghi writer/phase thực tế, giữ bằng chứng và storage cũ. Không khởi động writer cũ để cứu màn hình. Dùng bảng lỗi ở mục 9.1 hoặc quy trình controller ở mục 9.2; chỉ tiếp tục khi fencing, role và command đang chạy đã được xác định.
+**Nếu demo dừng giữa chừng:** ghi writer/phase thực tế, giữ bằng chứng và storage cũ. Không khởi động writer cũ để cứu màn hình. Dùng bảng lỗi ở mục 9.1 hoặc mục 9.2 nếu dùng watcher; chỉ tiếp tục khi fencing và role của hai database đã được xác định.
 
 ## Khi gặp lỗi, reboot hoặc chuyển VM cũ
 
