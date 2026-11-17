@@ -248,8 +248,8 @@ run "defaults_keep_the_documented_timing" {
   }
 
   assert {
-    condition     = output.dns_failover_timing.health_check_detection_seconds == 90 && output.dns_failover_timing.app_cname_ttl_seconds == 30
-    error_message = "Defaults must stay 30 s interval x 3 checks and a 30 s TTL."
+    condition     = output.dns_failover_timing.health_check_detection_seconds == 90 && output.dns_failover_timing.app_cname_ttl_seconds == 10
+    error_message = "Defaults must stay 30 s interval x 3 checks and a 10 s TTL."
   }
 }
 
@@ -261,4 +261,113 @@ run "reject_unsupported_health_check_interval" {
   }
 
   expect_failures = [var.health_check_interval_seconds]
+}
+
+run "recovery_opt_in" {
+  command = plan
+  variables {
+    enable_auto_failover = true
+    enable_auto_recovery = true
+    enable_auto_failback = true
+    enable_https         = true
+    certificate_email    = "operator@example.com"
+    enable_health_checks = true
+    enable_failover      = true
+  }
+  assert {
+    condition     = toset(output.azure_watcher_permissions) == toset(["ec2:DescribeInstances", "ec2:StopInstances", "route53:GetHealthCheckStatus"])
+    error_message = "Automatic recovery must not widen the watcher's AWS permissions; starting the old primary stays an operator action."
+  }
+  assert {
+    condition     = local.watcher_config.auto_recovery && local.watcher_config.auto_failback && output.auto_failover.failback
+    error_message = "Both recovery flags must reach the watcher configuration."
+  }
+}
+
+run "recovery_without_failback" {
+  command = plan
+  variables {
+    enable_auto_failover = true
+    enable_auto_recovery = true
+    enable_https         = true
+    certificate_email    = "operator@example.com"
+    enable_health_checks = true
+    enable_failover      = true
+  }
+  assert {
+    condition     = local.watcher_config.auto_recovery && !local.watcher_config.auto_failback
+    error_message = "Failback must stay off unless enable_auto_failback is set."
+  }
+}
+
+run "no_recovery_by_default" {
+  command = plan
+  variables {
+    enable_auto_failover = true
+    enable_https         = true
+    certificate_email    = "operator@example.com"
+    enable_health_checks = true
+    enable_failover      = true
+  }
+  assert {
+    condition     = !local.watcher_config.auto_recovery && !local.watcher_config.auto_failback && !contains(output.azure_watcher_permissions, "ec2:StartInstances")
+    error_message = "The watcher must not be able to start instances unless recovery is enabled."
+  }
+}
+
+run "reject_recovery_without_watcher" {
+  command = plan
+  variables {
+    enable_auto_recovery = true
+  }
+  expect_failures = [output.auto_failover]
+}
+
+run "reject_failback_without_recovery" {
+  command = plan
+  variables {
+    enable_auto_failover = true
+    enable_auto_failback = true
+    enable_https         = true
+    certificate_email    = "operator@example.com"
+    enable_health_checks = true
+    enable_failover      = true
+  }
+  expect_failures = [output.auto_failover]
+}
+
+run "azure_auto_start_opt_in" {
+  command = plan
+  variables {
+    enable_auto_failover    = true
+    enable_azure_auto_start = true
+    enable_https            = true
+    certificate_email       = "operator@example.com"
+    enable_health_checks    = true
+    enable_failover         = true
+  }
+  assert {
+    condition     = local.watcher_config.auto_start && output.auto_failover.auto_start
+    error_message = "The auto-start flag must reach the watcher configuration."
+  }
+  assert {
+    condition     = !contains(output.azure_watcher_permissions, "ec2:StartInstances")
+    error_message = "Releasing the Azure guard needs no extra AWS permission."
+  }
+}
+
+run "azure_auto_start_off_by_default" {
+  command = plan
+  assert {
+    condition     = !local.watcher_config.auto_start
+    error_message = "Releasing the Azure guard automatically must be opt-in."
+  }
+}
+
+run "reject_azure_auto_start_without_watcher" {
+  command = plan
+  variables {
+    enable_azure_auto_start = true
+  }
+  expect_failures = [output.auto_failover]
 }

@@ -1,11 +1,13 @@
 """DCS29 failover watcher. Runs as a systemd service on the Azure VM, outside the AWS region it watches.
 
 It fails over only when two views of the AWS origin agree it is down for N consecutive checks:
-  1. this VM probes https://<aws-origin>/health/database directly;
+  1. this VM probes https://<aws>/health/database directly;
   2. Route 53's health checkers (many regions) report the same endpoint as failing.
 Then it fences first (stops the EC2 instance and waits for `stopped`), promotes the local PostgreSQL
 standby, and verifies that Azure accepts writes. Route 53 moves traffic on its own once Azure is the
-only healthy writer. The watcher never fails back and never starts the old primary.
+only healthy writer. Without recovery enabled the watcher stops there: it never fails back and never
+starts the old primary. With recovery enabled (see recovery.py) it then waits for an operator to start the fenced EC2
+instance (the watcher never starts it), rejoins it as a standby and, if failback is enabled, moves the writer back to AWS.
 
     cloud_watcher.py          run the watch loop
     cloud_watcher.py --check  verify credentials, AWS API access and the local standby, change nothing
@@ -24,6 +26,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import promote
+import recovery
+import recovery_ops
 import watcher_core
 
 CONFIG = Path(os.environ.get('DCS29_WATCHER_CONFIG', '/etc/dcs29/watcher.json'))
@@ -93,13 +97,23 @@ def stop_aws(cfg):
     ec2(cfg).stop_instances(InstanceIds=[cfg['aws_instance_id']])
 
 
-def azure_writable(cfg):
+def origin_writable(origin):
     try:
-        with urllib.request.urlopen(cfg['azure_origin'] + '/api/database/status', timeout=8) as response:
+        with urllib.request.urlopen(origin + '/api/database/status', timeout=8) as response:
             status = json.load(response)
     except (urllib.error.URLError, TimeoutError, ValueError):
         return False
     return status.get('role') == 'primary' and status.get('writable') is True
+
+
+def azure_writable(cfg):
+    return origin_writable(cfg['azure_origin'])
+
+
+def aws_writable(cfg):
+    return origin_writable(cfg['aws_origin'])
+
+
 
 
 def fence(cfg, sleep=time.sleep):
@@ -153,12 +167,71 @@ def blocked():
     return None
 
 
+def recovery_settings(cfg):
+    return cfg.get('recovery') or {}
+
+
+def recovery_enabled(cfg):
+    return bool(recovery_settings(cfg).get('enabled'))
+
+
+class Deps:
+    """Everything recovery.py touches, in one place so tests can swap it."""
+
+    def __init__(self, cfg):
+        self.cfg = cfg
+        self.failback = bool(recovery_settings(cfg).get('failback'))
+        self.store = state_store()
+        self.template = (HERE / 'templates' / 'postgres-standby.yaml.tmpl').read_text(encoding='utf-8')
+        self.azure = recovery.LocalAzure(recovery_ops.ACTIONS)
+        self.aws = recovery.RemoteAws()
+        self.poll, self.catchup_timeout, self.lock_timeout, self.healthy_timeout = 10, 1800, 120, 180
+        self.sleep, self.monotonic, self.log = time.sleep, time.monotonic, log
+
+    def aws_state(self):
+        return aws_state(self.cfg)
+
+    def stop_aws(self):
+        stop_aws(self.cfg)
+
+    def aws_writable(self):
+        return aws_writable(self.cfg)
+
+    def paused(self):
+        return PAUSE.exists()
+
+    def clear_incident(self):
+        (promote.ROOT / 'failover-incident.json').unlink(missing_ok=True)
+
+
+def state_store():
+    return recovery.Store(promote.ROOT / 'recovery-state.json')
+
+
+def recover(cfg):
+    """Run or resume recovery. Any failure leaves the persisted phase in place and needs an operator."""
+    try:
+        outcome = recovery.run(Deps(cfg))
+    except Exception as error:
+        log(f'Recovery stopped, operator needed: {error}')
+        return 'operator-needed'
+    log(f'Recovery finished: {outcome}')
+    return outcome
+
+
+def check_recovery(cfg):
+    recovery.RemoteAws().call('ping', timeout=30)
+
+
 def check_setup(cfg):
     """Read-only self-test used by the deploy step before the service is enabled."""
     if aws_state(cfg) != 'running':
         raise RuntimeError('AWS instance is not running; enable the watcher only on a healthy baseline')
     route53().get_health_check_status(HealthCheckId=cfg['health_check_id'])
     promote.run_locked('preflight', 'watcher:2000-01-01T00:00:00Z')
+    if recovery_enabled(cfg):
+        check_recovery(cfg)
+        log('Recovery check passed: AWS recovery RPC reachable over WireGuard.')
     log('Setup check passed: AWS API reachable, Route 53 readable, local standby caught up.')
 
 
@@ -167,8 +240,17 @@ def main(argv):
     if '--check' in argv:
         check_setup(cfg)
         return 0
-    outcome = watcher_core.run(lambda: check_web(cfg), lambda: check_route53(cfg), lambda: failover(cfg),
-                               cfg['interval'], cfg['threshold'], blocked, log=log)
+    while True:
+        if recovery_enabled(cfg) and state_store().load() is not None:
+            outcome = recover(cfg)  # a previous run stopped mid-recovery, or recovery already completed
+        else:
+            outcome = watcher_core.run(lambda: check_web(cfg), lambda: check_route53(cfg), lambda: failover(cfg),
+                                       cfg['interval'], cfg['threshold'], blocked, log=log)
+            if outcome in ('failed-over', 'already-failed-over') and recovery_enabled(cfg) and (promote.ROOT / 'failover-incident.json').exists():
+                outcome = recover(cfg)
+        if outcome != 'rearmed':
+            break
+        log('Recovery complete: AWS is the writer again; resuming the watch.')
     log(f'Watcher finished: {outcome}')
     return 2 if outcome == 'operator-needed' else 0
 

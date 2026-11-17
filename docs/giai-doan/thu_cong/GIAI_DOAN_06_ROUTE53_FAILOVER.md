@@ -29,12 +29,12 @@ Runbook này là GĐ6A, thực hiện thủ công trước. Sau diễn tập và
 ## 2. LAPTOP — kiểm tra đầu vào
 
 ```powershell
-Resolve-DnsName aws-origin.YOUR_DOMAIN -Type A -Server 1.1.1.1
-Resolve-DnsName azure-origin.YOUR_DOMAIN -Type A -Server 1.1.1.1
-curl.exe --fail-with-body https://aws-origin.YOUR_DOMAIN/version
-curl.exe --fail-with-body https://azure-origin.YOUR_DOMAIN/version
-curl.exe --fail-with-body https://aws-origin.YOUR_DOMAIN/api/database/status
-curl.exe --fail-with-body https://azure-origin.YOUR_DOMAIN/api/database/status
+Resolve-DnsName aws.YOUR_DOMAIN -Type A -Server 1.1.1.1
+Resolve-DnsName azure.YOUR_DOMAIN -Type A -Server 1.1.1.1
+curl.exe --fail-with-body https://aws.YOUR_DOMAIN/version
+curl.exe --fail-with-body https://azure.YOUR_DOMAIN/version
+curl.exe --fail-with-body https://aws.YOUR_DOMAIN/api/database/status
+curl.exe --fail-with-body https://azure.YOUR_DOMAIN/api/database/status
 ```
 
 AWS writable, Azure standby streaming. /version cùng commit; dữ liệu Issues/schema được đối chiếu. Test hostname chung ép IP theo GĐ5; không dùng --resolve khi đo DNS thật.
@@ -50,7 +50,7 @@ SSH từng VM kiểm tra K3s/pod/PVC; không dùng docker compose up để bật
 3. Chọn **Resource = Endpoint → Specify endpoint by = Domain name**. Nếu giao diện có một ô bên phải menu **HTTPS**, nhập hostname origin AWS, port và path như sau (sau khi thay `YOUR_DOMAIN`):
 
    ```text
-   aws-origin.YOUR_DOMAIN:443/health/database
+   aws.YOUR_DOMAIN:443/health/database
    ```
 
    Mẫu là `hostname:443/path`. Không thêm `https://` khi menu đã chọn HTTPS; không nhập `app.YOUR_DOMAIN` vì tên chung sẽ đổi đích khi failover. Nếu Console có ô **Domain name**, **Port** và **Path** riêng, nhập lần lượt hostname origin, `443` và `/health/database`.
@@ -61,10 +61,10 @@ SSH từng VM kiểm tra K3s/pod/PVC; không dùng docker compose up để bật
    | Resource | **Endpoint** |
    | Specify endpoint by | **Domain name** |
    | Protocol trong menu | **HTTPS** |
-   | Ô bên phải menu HTTPS nếu giao diện gộp trường | `aws-origin.YOUR_DOMAIN:443/health/database` |
+   | Ô bên phải menu HTTPS nếu giao diện gộp trường | `aws.YOUR_DOMAIN:443/health/database` |
    | Port | `443`, nằm giữa hostname và path trong cùng ô |
 
-   **Nếu Console của bạn hiển thị UI khác:** ô Domain name riêng chỉ nhập `aws-origin.YOUR_DOMAIN`, ô Path/Resource path riêng nhập `/health/database`. Không nhập URL đầy đủ `https://...` vào ô chỉ nhận hostname.
+   **Nếu Console của bạn hiển thị UI khác:** ô Domain name riêng chỉ nhập `aws.YOUR_DOMAIN`, ô Path/Resource path riêng nhập `/health/database`. Không nhập URL đầy đủ `https://...` vào ô chỉ nhận hostname.
 4. Mở **Advanced configuration / Additional settings**:
 
 | Trường | Chọn |
@@ -72,14 +72,14 @@ SSH từng VM kiểm tra K3s/pod/PVC; không dùng docker compose up để bật
 | Request interval | **Standard / 30 seconds** |
 | Failure threshold | `3` |
 | Enable SNI | **Bật** |
-| Host name nếu có ô riêng | `aws-origin.YOUR_DOMAIN` |
+| Host name nếu có ô riêng | `aws.YOUR_DOMAIN` |
 | String matching / Search string | **Tắt**, để trống |
 | Latency measurement / Latency graphs | **Tắt** |
 | Health checker regions | Giữ recommended/default |
 | Invert health check status | **Tắt** |
 | Disabled | **Tắt**, check phải được enabled |
 
-5. Trước khi tạo, xem phần review/preview nếu có: endpoint phải là HTTPS đến `aws-origin.YOUR_DOMAIN` và path `/health/database`, không phải `/`. Nếu preview không hiển thị path, sau khi tạo mở chi tiết check → cấu hình endpoint để xác nhận **Resource path = `/health/database`**. Nếu AWS lưu path là `/`, sửa health check ngay trước khi tạo record failover; không coi check healthy là đủ vì `/` cũng có thể trả 200. Nếu có bước **Create alarm**, chọn **No / Không tạo alarm** trong GD6. Chọn **Next/Create health check** theo giao diện.
+5. Trước khi tạo, xem phần review/preview nếu có: endpoint phải là HTTPS đến `aws.YOUR_DOMAIN` và path `/health/database`, không phải `/`. Nếu preview không hiển thị path, sau khi tạo mở chi tiết check → cấu hình endpoint để xác nhận **Resource path = `/health/database`**. Nếu AWS lưu path là `/`, sửa health check ngay trước khi tạo record failover; không coi check healthy là đủ vì `/` cũng có thể trả 200. Nếu có bước **Create alarm**, chọn **No / Không tạo alarm** trong GD6. Chọn **Next/Create health check** theo giao diện.
 6. Mở check vừa tạo, ghi **Health check ID** vào ghi chú cá nhân (không phải Hosted zone ID). Đợi trạng thái cập nhật, không kết luận lỗi ngay khi vừa tạo.
 
 Nếu Console đang dùng form **IP address**: IP AWS là `AWS_PUBLIC_IP`, vẫn phải có hostname origin trong ô Host name/Domain name và bật SNI; không dùng IP làm TLS hostname. Chỉ chọn một cách cấu hình và ghi lại cách đã chọn.
@@ -88,16 +88,16 @@ Tham khảo [AWS: tạo health check](https://docs.aws.amazon.com/Route53/latest
 
 ### 3.2. Health check Azure — cũng tạo trên AWS Console
 
-Vẫn trong **Route 53 → Health checks → Create health check**. Với UI một ô như ảnh, chọn HTTPS và nhập `azure-origin.YOUR_DOMAIN:443/health/database` vào ô bên phải menu HTTPS. Lặp lại mục 3.1 với **các giá trị khác** sau:
+Vẫn trong **Route 53 → Health checks → Create health check**. Với UI một ô như ảnh, chọn HTTPS và nhập `azure.YOUR_DOMAIN:443/health/database` vào ô bên phải menu HTTPS. Lặp lại mục 3.1 với **các giá trị khác** sau:
 
 | Trường | Giá trị Azure |
 |---|---|
 | Name | `dcs29-azure-https-ready` |
-| Ô Domain name của UI một ô trong ảnh | `azure-origin.YOUR_DOMAIN:443/health/database` |
-| Host name nếu có ô riêng | `azure-origin.YOUR_DOMAIN` |
+| Ô Domain name của UI một ô trong ảnh | `azure.YOUR_DOMAIN:443/health/database` |
+| Host name nếu có ô riêng | `azure.YOUR_DOMAIN` |
 | IP nếu chọn form IP address | `AZURE_PUBLIC_IP` |
 
-**Các giá trị còn lại giống AWS:** HTTPS, 443, `/health/database`, interval 30, threshold 3, SNI bật; string matching/latency/alarm/invert tắt. Lưu check, mở chi tiết để xác nhận **Resource path = `/health/database`**, rồi ghi Health check ID Azure riêng. Nếu UI cũ có ô riêng, Domain name chỉ là `azure-origin.YOUR_DOMAIN`, Path là `/health/database`.
+**Các giá trị còn lại giống AWS:** HTTPS, 443, `/health/database`, interval 30, threshold 3, SNI bật; string matching/latency/alarm/invert tắt. Lưu check, mở chi tiết để xác nhận **Resource path = `/health/database`**, rồi ghi Health check ID Azure riêng. Nếu UI cũ có ô riêng, Domain name chỉ là `azure.YOUR_DOMAIN`, Path là `/health/database`.
 
 ### 3.3. Hiểu trạng thái writer check
 
@@ -174,7 +174,7 @@ Chọn **Create record**; nếu mở wizard, chọn **Failover routing**. Form t
 | Record name | `app` (giao diện thêm `.YOUR_DOMAIN`) |
 | Record type | **CNAME** |
 | Alias | **Off** |
-| Value | `aws-origin.YOUR_DOMAIN` |
+| Value | `aws.YOUR_DOMAIN` |
 | TTL | `30` giây |
 | Routing policy | **Failover** |
 | Failover record type / Role | **Primary** |
@@ -191,7 +191,7 @@ Chọn **Create record** lần nữa, điền các giá trị giống Primary ng
 | Trường | Giá trị |
 |---|---|
 | Record name | Vẫn là `app` |
-| Value | `azure-origin.YOUR_DOMAIN` |
+| Value | `azure.YOUR_DOMAIN` |
 | Failover record type / Role | **Secondary** |
 | Record ID / Set identifier | `azure-secondary` |
 | Health check | `dcs29-azure-https-ready` / đúng ID Azure |

@@ -143,5 +143,78 @@ class Blocked(unittest.TestCase):
         self.assertEqual(cw.incident_owner(), 'watcher:2026-01-01T00:00:00Z')
 
 
+class Main(unittest.TestCase):
+    """How the loop continues after a failover when recovery is on."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.cfg = CFG | {'recovery': {'enabled': True, 'failback': True}}
+        for patcher in (patch.object(cw.promote, 'ROOT', self.root), patch.object(cw, 'load_config', lambda: self.cfg)):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def run_main(self, outcomes, recover_results=('recovered',)):
+        watch = Mock(side_effect=outcomes)
+        recover = Mock(side_effect=list(recover_results))
+        with patch.object(cw.watcher_core, 'run', watch), patch.object(cw, 'recover', recover):
+            code = cw.main([])
+        return code, watch, recover
+
+    def test_recovery_starts_after_a_failover_that_left_an_incident(self):
+        (self.root / 'failover-incident.json').write_text('{}')
+        code, watch, recover = self.run_main(['failed-over'])
+        self.assertEqual((code, recover.call_count), (0, 1))
+
+    def test_no_recovery_without_an_incident_or_when_disabled(self):
+        code, watch, recover = self.run_main(['failed-over'])
+        self.assertEqual(recover.call_count, 0)
+        (self.root / 'failover-incident.json').write_text('{}')
+        self.cfg = CFG
+        code, watch, recover = self.run_main(['failed-over'])
+        self.assertEqual(recover.call_count, 0)
+
+    def test_a_saved_recovery_state_resumes_before_any_watching(self):
+        cw.state_store().save({'phase': 'failback-fence'})
+        code, watch, recover = self.run_main([])
+        self.assertEqual((watch.call_count, recover.call_count, code), (0, 1, 0))
+
+    def test_operator_needed_exits_with_code_2(self):
+        (self.root / 'failover-incident.json').write_text('{}')
+        code, watch, recover = self.run_main(['failed-over'], ['operator-needed'])
+        self.assertEqual(code, 2)
+
+    def test_after_a_full_failback_the_watch_resumes(self):
+        (self.root / 'failover-incident.json').write_text('{}')
+        code, watch, recover = self.run_main(['failed-over', 'already-failed-over'], ['rearmed', 'recovered'])
+        self.assertEqual((watch.call_count, recover.call_count, code), (2, 2, 0))
+
+
+class RecoverWrapper(unittest.TestCase):
+    def test_any_failure_becomes_operator_needed(self):
+        with patch.object(cw, 'Deps'), patch.object(cw.recovery, 'run', side_effect=cw.recovery.OperatorNeeded('stop')):
+            self.assertEqual(cw.recover(CFG), 'operator-needed')
+        with patch.object(cw, 'Deps'), patch.object(cw.recovery, 'run', side_effect=OSError('disk')):
+            self.assertEqual(cw.recover(CFG), 'operator-needed')
+        with patch.object(cw, 'Deps'), patch.object(cw.recovery, 'run', return_value='rearmed'):
+            self.assertEqual(cw.recover(CFG), 'rearmed')
+
+
+class Writable(unittest.TestCase):
+    def test_both_origins_use_the_same_primary_and_writable_test(self):
+        for check, origin in ((cw.aws_writable, 'https://aws.example.com'), (cw.azure_writable, 'https://azure.example.com')):
+            body = Mock()
+            body.__enter__ = lambda s: body
+            body.__exit__ = lambda s, *a: False
+            body.read.return_value = b'{"role": "primary", "writable": true}'
+            with patch.object(cw.urllib.request, 'urlopen', return_value=body) as opened:
+                self.assertTrue(check(CFG))
+            self.assertTrue(opened.call_args.args[0].startswith(origin))
+            body.read.return_value = b'{"role": "standby", "writable": false}'
+            with patch.object(cw.urllib.request, 'urlopen', return_value=body):
+                self.assertFalse(check(CFG))
+
+
 if __name__ == '__main__':
     unittest.main()

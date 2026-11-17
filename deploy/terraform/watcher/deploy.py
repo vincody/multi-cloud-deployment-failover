@@ -45,15 +45,24 @@ def validate(config):
     return key
 
 
+RECOVERY_FILES = ('promote.py', 'recovery_ops.py', 'rpc.py')
+
+
 def bundle():
-    files = {name: (HERE / name).read_text(encoding='utf-8') for name in ('cloud_watcher.py', 'promote.py')}
+    files = {name: (HERE / name).read_text(encoding='utf-8') for name in ('cloud_watcher.py', 'promote.py', 'recovery.py', 'recovery_ops.py', 'rpc.py', 'unguard.py')}
     files['watcher_core.py'] = SHARED_CORE.read_text(encoding='utf-8')
+    files['templates/postgres-standby.yaml.tmpl'] = (HERE / 'templates' / 'postgres-standby.yaml.tmpl').read_text(encoding='utf-8')
     return files
+
+
+def recovery_bundle():
+    return {name: (HERE / name).read_text(encoding='utf-8') for name in RECOVERY_FILES}
 
 
 def deploy(config, host_factory=Host):
     key = validate(config)
     values = credentials(config.get('credentials_file', ''))
+    recovery = bool(config.get('auto_recovery'))
     azure = host_factory('azure', config, key)
     azure.wait()
     status = azure.call('status')
@@ -63,10 +72,19 @@ def deploy(config, host_factory=Host):
         'files': bundle(), 'credentials': values,
         'config': {'aws_region': config['aws_region'], 'aws_instance_id': config['aws_instance_id'],
                    'aws_origin': 'https://' + config['aws_origin_host'], 'azure_origin': 'https://' + config['azure_origin_host'],
-                   'health_check_id': config['health_check_id'], 'interval': int(config['interval']), 'threshold': int(config['threshold'])}})
+                   'health_check_id': config['health_check_id'], 'interval': int(config['interval']), 'threshold': int(config['threshold']),
+                   'recovery': {'enabled': recovery, 'failback': bool(config.get('auto_failback')) and recovery},
+                   'auto_start': bool(config.get('auto_start'))}})
     del values
+    if recovery:
+        public_key = azure.call('recovery_keygen')['public_key']
+        aws = host_factory('aws', config, key)
+        aws.wait()
+        aws.call('recovery_install', {'files': recovery_bundle(), 'public_key': public_key})
     azure.call('watcher_check')
     azure.call('watcher_enable')
+    if config.get('auto_start'):
+        azure.call('unguard_enable')
     print('Failover watcher installed and active on the Azure VM.', flush=True)
 
 

@@ -1,6 +1,6 @@
 # Giai đoạn 5 — Domain chung và HTTPS trên AWS EC2 / Azure VM
 
-**Đầu vào:** GĐ3/GĐ4 đã pass HTTP trên hai origin. Điền `YOUR_DOMAIN`, `AWS_PUBLIC_IP`, `AZURE_PUBLIC_IP`, `AWS_REGION`, `AZURE_REGION`, `CERT_EMAIL` trong [bảng thông số](THONG_SO_TRIEN_KHAI.md). Domain phải thuộc quyền quản lý của bạn; thay mọi ký hiệu mẫu trước khi nhập vào Console, Ingress hoặc chạy lệnh. `aws-origin.YOUR_DOMAIN`, `azure-origin.YOUR_DOMAIN`, `app.YOUR_DOMAIN` là ba hostname nằm trong **cùng một domain**, không phải ba domain phải mua.
+**Đầu vào:** GĐ3/GĐ4 đã pass HTTP trên hai origin. Điền `YOUR_DOMAIN`, `AWS_PUBLIC_IP`, `AZURE_PUBLIC_IP`, `AWS_REGION`, `AZURE_REGION`, `CERT_EMAIL` trong [bảng thông số](THONG_SO_TRIEN_KHAI.md). Domain phải thuộc quyền quản lý của bạn; thay mọi ký hiệu mẫu trước khi nhập vào Console, Ingress hoặc chạy lệnh. `aws.YOUR_DOMAIN`, `azure.YOUR_DOMAIN`, `app.YOUR_DOMAIN` là ba hostname nằm trong **cùng một domain**, không phải ba domain phải mua.
 
 **Mục tiêu:** cả hai VM có HTTPS hợp lệ cho hostname origin riêng và hostname chung `app.YOUR_DOMAIN` trước khi GĐ6 tạo DNS failover. AWS dùng IAM role cho Certbot DNS-01; Azure dùng credential DNS giới hạn quyền, lưu ngoài repo. Không chép certificate/private key giữa hai cloud.
 
@@ -25,8 +25,8 @@ Nếu tạm nghỉ giữa GĐ5/GĐ6, có thể stop hai VM; khi bật lại, xá
 ## 1. Ta sẽ làm gì?
 
 ```text
-aws-origin.YOUR_DOMAIN   → AWS_PUBLIC_IP   → Traefik HTTPS → Service issues-app → pod app:8080
-azure-origin.YOUR_DOMAIN → AZURE_PUBLIC_IP  → Traefik HTTPS → Service issues-app → pod app:8080
+aws.YOUR_DOMAIN   → AWS_PUBLIC_IP   → Traefik HTTPS → Service issues-app → pod app:8080
+azure.YOUR_DOMAIN → AZURE_PUBLIC_IP  → Traefik HTTPS → Service issues-app → pod app:8080
 
 app.YOUR_DOMAIN: certificate hợp lệ trên CẢ HAI VM
                 kiểm tra bằng curl --resolve trước khi tạo DNS failover
@@ -56,18 +56,18 @@ Trước khi kiểm tra endpoint, cả EC2 và Azure VM phải đang Running và
 
 ## 2. Chuẩn bị domain và địa chỉ origin
 
-Bạn cần một domain đã đăng ký và quyền thay đổi nameserver tại nhà đăng ký. Chưa cần có sẵn subdomain: ở mục 4 bạn sẽ tạo hai A record `aws-origin`/`azure-origin`, ở GĐ6 tạo hai record failover cùng tên `app`. Nếu domain đang có website/email, sao chép các record đang dùng sang Route 53 trước khi đổi nameserver; kiểm tra DNSSEC/DS tại nhà đăng ký.
+Bạn cần một domain đã đăng ký và quyền thay đổi nameserver tại nhà đăng ký. Chưa cần có sẵn subdomain: ở mục 4 bạn sẽ tạo hai A record `aws`/`azure`, ở GĐ6 tạo hai record failover cùng tên `app`. Nếu domain đang có website/email, sao chép các record đang dùng sang Route 53 trước khi đổi nameserver; kiểm tra DNSSEC/DS tại nhà đăng ký.
 
 ### 2.1. Các tên ta sẽ dùng
 
 | Tên                                 | Dùng để làm gì?                                                     | Khi nào tạo DNS?                                                             |
 | ------------------------------------ | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------ |
 | `YOUR_DOMAIN`              | Domain bạn đã đăng ký, đồng thời là tên hosted zone           | Mục 3 tạo zone; chưa cần A record cho domain gốc                          |
-| `aws-origin.YOUR_DOMAIN`   | Địa chỉ riêng của ứng dụng trên AWS                              | Mục 4 tạo A record`aws-origin`                                             |
-| `azure-origin.YOUR_DOMAIN` | Địa chỉ riêng của ứng dụng trên Azure                            | Mục 4 tạo A record`azure-origin`                                           |
+| `aws.YOUR_DOMAIN`   | Địa chỉ riêng của ứng dụng trên AWS                              | Mục 4 tạo A record`aws`                                             |
+| `azure.YOUR_DOMAIN` | Địa chỉ riêng của ứng dụng trên Azure                            | Mục 4 tạo A record`azure`                                           |
 | `app.YOUR_DOMAIN`          | Địa chỉ chung của người dùng, sẽ tự đổi cloud khi có sự cố | GĐ5 cấp certificate và kiểm tra ép IP; GĐ6 mới tạo DNS failover`app` |
 
-Ví dụ: khi thêm A record tên **`aws-origin`** vào hosted zone **`YOUR_DOMAIN`**, bạn vừa tạo subdomain **`aws-origin.YOUR_DOMAIN`**. Không cần tạo thư mục, mua hosting hoặc xin subdomain từ nhà đăng ký tên miền.
+Ví dụ: khi thêm A record tên **`aws`** vào hosted zone **`YOUR_DOMAIN`**, bạn vừa tạo subdomain **`aws.YOUR_DOMAIN`**. Không cần tạo thư mục, mua hosting hoặc xin subdomain từ nhà đăng ký tên miền.
 
 ### 2.2. Trước khi mở Route 53, lấy hai IP của VM
 
@@ -88,8 +88,8 @@ Lưu một ghi chú cá nhân như sau; chỉ điền những giá trị hiện 
 ```text
 Domain / Hosted zone name: YOUR_DOMAIN
 Shared hostname: app.YOUR_DOMAIN
-AWS origin hostname: aws-origin.YOUR_DOMAIN
-Azure origin hostname: azure-origin.YOUR_DOMAIN
+AWS origin hostname: aws.YOUR_DOMAIN
+Azure origin hostname: azure.YOUR_DOMAIN
 AWS Public IP: AWS_PUBLIC_IP (đối chiếu Elastic IP)
 Azure Public IP: AZURE_PUBLIC_IP (đối chiếu Static)
 Hosted zone ID: <để trống; lấy sau khi làm mục 3.1>
@@ -150,22 +150,22 @@ Trong **Route 53 → Hosted zones → YOUR_DOMAIN → Create record**, tạo l�
 
 | Trường       | AWS                         | Azure                       |
 | -------------- | --------------------------- | --------------------------- |
-| Record name    | `aws-origin`              | `azure-origin`            |
+| Record name    | `aws`              | `azure`            |
 | Record type    | **A — IPv4 address** | **A — IPv4 address** |
 | Alias          | **Off**               | **Off**               |
 | Value          | **`AWS_PUBLIC_IP`**  | **`AZURE_PUBLIC_IP`** |
 | TTL            | `60` giây cho lab        | `60` giây                |
 | Routing policy | **Simple routing**    | **Simple routing**    |
 
-Bấm **Create records**. Ở ô **Record name**, chỉ nhập `aws-origin` hoặc `azure-origin`; giao diện gắn phần đuôi `.YOUR_DOMAIN`. Kiểm tra tên đầy đủ trước khi lưu để tránh bị lặp domain. Ô **Value** dùng IP thật đã lấy ở mục 2.2, không nhập URL, port hoặc private IP. Sau khi lưu, danh sách phải có `aws-origin.YOUR_DOMAIN` và `azure-origin.YOUR_DOMAIN`: hai subdomain đã được tạo. Chưa thêm AAAA khi chưa triển khai IPv6.
+Bấm **Create records**. Ở ô **Record name**, chỉ nhập `aws` hoặc `azure`; giao diện gắn phần đuôi `.YOUR_DOMAIN`. Kiểm tra tên đầy đủ trước khi lưu để tránh bị lặp domain. Ô **Value** dùng IP thật đã lấy ở mục 2.2, không nhập URL, port hoặc private IP. Sau khi lưu, danh sách phải có `aws.YOUR_DOMAIN` và `azure.YOUR_DOMAIN`: hai subdomain đã được tạo. Chưa thêm AAAA khi chưa triển khai IPv6.
 
 **LAPTOP — PowerShell Windows:** chạy các lệnh dưới, không chạy trong SSH:
 
 ```powershell
-Resolve-DnsName aws-origin.YOUR_DOMAIN -Type A -Server 1.1.1.1
-Resolve-DnsName azure-origin.YOUR_DOMAIN -Type A -Server 1.1.1.1
-curl.exe --fail-with-body http://aws-origin.YOUR_DOMAIN/version
-curl.exe --fail-with-body http://azure-origin.YOUR_DOMAIN/version
+Resolve-DnsName aws.YOUR_DOMAIN -Type A -Server 1.1.1.1
+Resolve-DnsName azure.YOUR_DOMAIN -Type A -Server 1.1.1.1
+curl.exe --fail-with-body http://aws.YOUR_DOMAIN/version
+curl.exe --fail-with-body http://azure.YOUR_DOMAIN/version
 ```
 
 Mỗi tên phải trả đúng IP và environment. Nếu HTTP qua IP được nhưng qua tên không được, kiểm tra delegation/record/cache trước khi tiếp tục. GĐ5 không tạo CNAME simple cho `app`, nên GĐ6 không cần xóa record tạm do hướng dẫn này tạo.
@@ -240,8 +240,8 @@ Không bật UFW mới trong bước này khi chưa chuẩn bị rule SSH. Mở 
           "route53:ChangeResourceRecordSetsRecordTypes": ["TXT"],
           "route53:ChangeResourceRecordSetsNormalizedRecordNames": [
             "_acme-challenge.app.YOUR_DOMAIN",
-            "_acme-challenge.aws-origin.YOUR_DOMAIN",
-            "_acme-challenge.azure-origin.YOUR_DOMAIN"
+            "_acme-challenge.aws.YOUR_DOMAIN",
+            "_acme-challenge.azure.YOUR_DOMAIN"
           ]
         }
       }
@@ -321,7 +321,7 @@ Thay `YOUR_DOMAIN` bằng domain thật và `CERT_EMAIL` bằng email nhận th�
 sudo certbot certonly --dns-route53 \
   --cert-name dcs29-aws \
   -d app.YOUR_DOMAIN \
-  -d aws-origin.YOUR_DOMAIN \
+  -d aws.YOUR_DOMAIN \
   --email CERT_EMAIL --agree-tos --non-interactive
 sudo certbot certificates
 ```
@@ -341,7 +341,7 @@ Kỳ vọng certificate có hai SAN đúng và đường dẫn:
 sudo env AWS_PROFILE=default AWS_SHARED_CREDENTIALS_FILE=/root/.aws/credentials certbot certonly --dns-route53 \
   --cert-name dcs29-azure \
   -d app.YOUR_DOMAIN \
-  -d azure-origin.YOUR_DOMAIN \
+  -d azure.YOUR_DOMAIN \
   --email CERT_EMAIL --agree-tos --non-interactive
 sudo certbot certificates
 ```
@@ -409,10 +409,10 @@ spec:
   tls:
     - secretName: issues-tls
       hosts:
-        - aws-origin.YOUR_DOMAIN
+        - aws.YOUR_DOMAIN
         - app.YOUR_DOMAIN
   rules:
-    - host: aws-origin.YOUR_DOMAIN
+    - host: aws.YOUR_DOMAIN
       http:
         paths:
           - path: /
@@ -434,7 +434,7 @@ spec:
                   number: 80
 ```
 
-Trên Azure tạo cùng file nhưng đổi cả hai chỗ aws-origin thành azure-origin; giữ app.YOUR_DOMAIN, tên Service và TLS Secret. Không dùng bản AWS nguyên xi trên Azure.
+Trên Azure tạo cùng file nhưng đổi cả hai chỗ aws thành azure; giữ app.YOUR_DOMAIN, tên Service và TLS Secret. Không dùng bản AWS nguyên xi trên Azure.
 
 ### 8.4. Dry-run và áp dụng trên từng VM
 
@@ -452,10 +452,10 @@ Traefik/ServiceLB phải lắng nghe 443 trên VM và SG/NSG đã cho phép. Kh�
 PowerShell laptop, thay domain/IP thật:
 
 ```powershell
-curl.exe --fail-with-body https://aws-origin.YOUR_DOMAIN/version
-curl.exe --fail-with-body https://azure-origin.YOUR_DOMAIN/version
-curl.exe --fail-with-body https://aws-origin.YOUR_DOMAIN/api/database/status
-curl.exe --fail-with-body https://azure-origin.YOUR_DOMAIN/api/database/status
+curl.exe --fail-with-body https://aws.YOUR_DOMAIN/version
+curl.exe --fail-with-body https://azure.YOUR_DOMAIN/version
+curl.exe --fail-with-body https://aws.YOUR_DOMAIN/api/database/status
+curl.exe --fail-with-body https://azure.YOUR_DOMAIN/api/database/status
 ```
 
 AWS primary, Azure standby; cùng commit/digest. /health/database Azure trả 503 bình thường khi standby; không dùng curl --fail ở endpoint đó để nghiệm thu TLS.
@@ -527,10 +527,10 @@ sudo k3s kubectl apply -f /opt/dcs29/redirect-https.yaml
 PowerShell laptop:
 
 ```powershell
-curl.exe -I http://aws-origin.YOUR_DOMAIN/version
-curl.exe -I http://azure-origin.YOUR_DOMAIN/version
-curl.exe --fail-with-body -L http://aws-origin.YOUR_DOMAIN/version
-curl.exe --fail-with-body -L http://azure-origin.YOUR_DOMAIN/version
+curl.exe -I http://aws.YOUR_DOMAIN/version
+curl.exe -I http://azure.YOUR_DOMAIN/version
+curl.exe --fail-with-body -L http://aws.YOUR_DOMAIN/version
+curl.exe --fail-with-body -L http://azure.YOUR_DOMAIN/version
 ```
 
 Kỳ vọng redirect tới HTTPS cùng hostname/path; -L trả JSON đúng cloud, không lỗi TLS hoặc vòng lặp. Nếu CRD thiếu/dry-run lỗi, xử lý Traefik theo version trước, không dán cấu hình NGINX cũ vào cluster. Giữ cổng 80 cho redirect; DNS-01 không cần cổng này để xác thực certificate. Nguồn: [Traefik RedirectScheme](https://doc.traefik.io/traefik/reference/routing-configuration/http/middlewares/redirectscheme/).

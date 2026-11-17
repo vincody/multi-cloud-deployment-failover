@@ -53,7 +53,7 @@ enable_failover = false
 # See: terraform output dns_failover_timing
 health_check_interval_seconds  = 30
 health_check_failure_threshold = 3
-dns_ttl_seconds                = 30
+dns_ttl_seconds                = 10
 
 # ---- Round 5 (optional): failover watcher on the Azure VM ----
 
@@ -61,6 +61,12 @@ dns_ttl_seconds                = 30
 #   -target=aws_iam_user.azure_watcher -target=aws_iam_user_policy.azure_watcher
 # create an access key for that user outside Terraform, then point this at a private INI [default] file.
 enable_auto_failover           = false
+# After a failover: once YOU start the fenced EC2 again, rejoin it as a standby. The watcher never starts EC2.
+enable_auto_recovery           = false
+# After the rejoin: move the writer back to AWS. Off keeps Azure as the writer.
+enable_auto_failback           = false
+# After an Azure reboot, release the K3s start guard when it is provably safe (unguard.py).
+enable_azure_auto_start        = false
 azure_watcher_credentials_file = ""
 watcher_threshold              = 3
 watcher_interval_seconds       = 5

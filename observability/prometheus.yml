@@ -1,3 +1,5 @@
+# TODO: thay `example.com` bằng domain_name thật của bạn (trùng với deploy/terraform/terraform.tfvars)
+# ở đúng 5 URL bên dưới: 3 URL /health/live (job blackbox_https) và 2 URL /health/database (job blackbox_writer).
 global:
   scrape_interval: 10s
   scrape_timeout: 8s
@@ -13,13 +15,13 @@ scrape_configs:
     params:
       module: [https_ready]
     static_configs:
-      - targets: ["https://aws-origin.cloudfailover.id.vn/health/live"]
+      - targets: ["https://aws.example.com/health/live"]
         labels:
-          target_name: aws-origin
-      - targets: ["https://azure-origin.cloudfailover.id.vn/health/live"]
+          target_name: aws
+      - targets: ["https://azure.example.com/health/live"]
         labels:
-          target_name: azure-origin
-      - targets: ["https://app.cloudfailover.id.vn/health/live"]
+          target_name: azure
+      - targets: ["https://app.example.com/health/live"]
         labels:
           target_name: shared-domain
     relabel_configs:
@@ -37,12 +39,12 @@ scrape_configs:
     params:
       module: [https_ready]
     static_configs:
-      - targets: ["https://aws-origin.cloudfailover.id.vn/health/database"]
+      - targets: ["https://aws.example.com/health/database"]
         labels:
-          target_name: aws-origin
-      - targets: ["https://azure-origin.cloudfailover.id.vn/health/database"]
+          target_name: aws
+      - targets: ["https://azure.example.com/health/database"]
         labels:
-          target_name: azure-origin
+          target_name: azure
     relabel_configs:
       - source_labels: [__address__]
         target_label: __param_target

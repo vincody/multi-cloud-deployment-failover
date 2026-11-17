@@ -87,7 +87,7 @@ Nếu database không thuộc automation, credential file bị mất nhưng Secr
 
 Guard `/etc/systemd/system/k3s.service.d/10-dr-start-guard.conf` yêu cầu `/run/issues-k3s-start-approved`. Marker chỉ tồn tại trong boot đang chạy, mất sau reboot; tránh AWS primary cũ tự chạy lại khi Azure đã promote. Guard không thay thế fencing cloud.
 
-Sau restart bình thường, chỉ khi đã xác nhận chưa có failover và đúng role trước khi tắt, người vận hành mới touch marker/start K3s, rồi kiểm tra lại streaming/writer. Sau failover phải rejoin DB cũ bằng PVC mới trước failback. Hướng dẫn chi tiết nằm ngay ở mục 7.3 và 9.1 của [hướng dẫn triển khai](TRIEN_KHAI_BANG_TERRAFORM.md).
+Sau restart bình thường, chỉ khi đã xác nhận chưa có failover và đúng role trước khi tắt, người vận hành mới touch marker/start K3s, rồi kiểm tra lại streaming/writer. Sau failover phải rejoin DB cũ bằng PVC mới trước failback. Hướng dẫn chi tiết nằm ở Phụ lục B.3 và Phụ lục A của [hướng dẫn triển khai](TRIEN_KHAI_BANG_TERRAFORM.md).
 
 Các bước vẫn do người vận hành thực hiện:
 

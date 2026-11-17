@@ -200,7 +200,7 @@ Raw data là bất biến; tạo file tổng hợp riêng. Không chỉnh raw CS
 
 ## 11. Cleanup sau thí nghiệm
 
-Export evidence trước. Nếu đã cài watcher, `sudo systemctl disable --now dcs29-watcher` trước khi xóa VM (mục 9.2 bước 6 của hướng dẫn Terraform); không để dịch vụ chạy trong lúc xóa VM. Dừng/xóa đúng resources theo inventory: EC2, EBS nếu không cần, Elastic IP/public IPv4, Route 53 checks/records, Azure VM/managed disk/NIC/Public IP/Resource Group, log retention. Không xóa hosted zone/domain/tài nguyên dùng chung nếu chưa xác nhận.
+Export evidence trước. Nếu đã cài watcher, `sudo systemctl disable --now dcs29-watcher` trước khi xóa VM (mục 8 bước 6 của hướng dẫn Terraform); không để dịch vụ chạy trong lúc xóa VM. Dừng/xóa đúng resources theo inventory: EC2, EBS nếu không cần, Elastic IP/public IPv4, Route 53 checks/records, Azure VM/managed disk/NIC/Public IP/Resource Group, log retention. Không xóa hosted zone/domain/tài nguyên dùng chung nếu chưa xác nhận.
 
 ## 12. Checklist nghiệm thu
 

@@ -212,7 +212,7 @@ variable "enable_failover" {
 variable "dns_ttl_seconds" {
   description = "TTL of the shared app CNAME records. Lower values shorten how long clients keep the old origin after a failover."
   type        = number
-  default     = 30
+  default     = 10
   validation {
     condition     = var.dns_ttl_seconds >= 10 && var.dns_ttl_seconds <= 300
     error_message = "dns_ttl_seconds must be between 10 and 300."
@@ -243,6 +243,24 @@ variable "health_check_failure_threshold" {
 
 variable "enable_auto_failover" {
   description = "Install the one-way AWS->Azure failover watcher on the Azure VM after a successful manual drill. No automatic failback."
+  type        = bool
+  default     = false
+}
+
+variable "enable_auto_recovery" {
+  description = "After a watcher failover, wait for an operator to start the fenced EC2 instance, then rejoin it as a standby of Azure. Requires enable_auto_failover. The watcher never starts EC2 and gets no extra AWS permission."
+  type        = bool
+  default     = false
+}
+
+variable "enable_auto_failback" {
+  description = "After a successful rejoin, move the writer back to AWS and rebuild Azure as its standby. Requires enable_auto_recovery. Off keeps Azure as the writer, which is a valid end state."
+  type        = bool
+  default     = false
+}
+
+variable "enable_azure_auto_start" {
+  description = "After an Azure VM reboot, release the K3s start guard automatically when the local database role and the AWS state prove it is safe. Requires enable_auto_failover."
   type        = bool
   default     = false
 }

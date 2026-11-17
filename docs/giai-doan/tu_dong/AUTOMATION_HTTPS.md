@@ -12,7 +12,7 @@ certificate_email = "EMAIL_THAT_CUA_BAN"
 azure_dns_credentials_file = "C:/Users/YOUR_USER/.ssh/dcs29-azure-dns.ini"
 ```
 
-Phải thay email/path bằng giá trị thật; giữ `enable_workload_automation=true`. Lượt đầu giữ HTTPS false, tạo hạ tầng/app rồi đổi NS tại nhà đăng ký. Các bước domain, IAM Console, nội dung file credential, plan/apply và kiểm tra đều trình bày ngay tại [mục 8 của hướng dẫn triển khai](TRIEN_KHAI_BANG_TERRAFORM.md#8-tự-động-domain-certificate-ingress-https-và-renewal).
+Phải thay email/path bằng giá trị thật; giữ `enable_workload_automation=true`. Lượt đầu giữ HTTPS false, tạo hạ tầng/app rồi đổi NS tại nhà đăng ký. Các bước domain, IAM Console, nội dung file credential, plan/apply và kiểm tra đều trình bày ngay tại [mục 4 của hướng dẫn triển khai](TRIEN_KHAI_BANG_TERRAFORM.md#4-lượt-2--domain-và-https).
 
 AWS dùng IAM instance role. Azure dùng access key của IAM user DNS-only Terraform đã tạo, từ file INI `[default]` ngoài repo; key được đọc bởi Python, chuyển qua SSH stdin và giữ trên Azure root-only. Terraform chỉ lưu path, không tạo access key hoặc đọc nội dung credential vào state. Không dùng credential có session token hết hạn cho renewal tự động.
 

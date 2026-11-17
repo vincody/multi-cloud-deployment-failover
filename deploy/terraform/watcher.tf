@@ -6,7 +6,10 @@ resource "aws_iam_user" "azure_watcher" {
 }
 
 locals {
+  recovery_enabled = var.enable_auto_failover && var.enable_auto_recovery
+
   # Everything the watcher may do in AWS: read instance and health state, and stop the old primary.
+  # It can never start an instance: bringing the old primary back is an operator decision.
   watcher_statements = [
     { Effect = "Allow", Action = ["ec2:DescribeInstances"], Resource = "*" },
     { Effect = "Allow", Action = ["ec2:StopInstances"], Resource = aws_instance.primary.arn },
@@ -30,6 +33,9 @@ locals {
     threshold         = var.watcher_threshold
     interval          = var.watcher_interval_seconds
     credentials_file  = var.azure_watcher_credentials_file
+    auto_recovery     = local.recovery_enabled
+    auto_failback     = local.recovery_enabled && var.enable_auto_failback
+    auto_start        = var.enable_auto_failover && var.enable_azure_auto_start
   })
 }
 
@@ -38,7 +44,7 @@ resource "terraform_data" "watcher" {
   triggers_replace = {
     azure  = azurerm_linux_virtual_machine.standby.id
     config = local.watcher_config
-    hash   = sha256(join("", [for name in sort(tolist(fileset("${path.module}/watcher", "*.py"))) : filesha256("${path.module}/watcher/${name}")], [filesha256("${path.module}/../../scripts/watcher_core.py")]))
+    hash   = sha256(join("", [for name in sort(concat(tolist(fileset("${path.module}/watcher", "*.py")), tolist(fileset("${path.module}/watcher", "templates/*.tmpl")))) : filesha256("${path.module}/watcher/${name}")], [filesha256("${path.module}/../../scripts/watcher_core.py")]))
   }
   lifecycle {
     precondition {
@@ -60,10 +66,18 @@ resource "terraform_data" "watcher" {
 output "auto_failover" {
   description = "Watcher runs on the Azure VM; check it with: systemctl status dcs29-watcher"
   value = {
-    enabled   = var.enable_auto_failover
-    host      = "azure"
-    threshold = var.watcher_threshold
-    interval  = var.watcher_interval_seconds
+    enabled    = var.enable_auto_failover
+    host       = "azure"
+    threshold  = var.watcher_threshold
+    interval   = var.watcher_interval_seconds
+    recovery   = local.recovery_enabled
+    failback   = local.recovery_enabled && var.enable_auto_failback
+    auto_start = var.enable_auto_failover && var.enable_azure_auto_start
+  }
+
+  precondition {
+    condition     = (!var.enable_auto_recovery || var.enable_auto_failover) && (!var.enable_auto_failback || var.enable_auto_recovery) && (!var.enable_azure_auto_start || var.enable_auto_failover)
+    error_message = "enable_auto_recovery and enable_azure_auto_start require enable_auto_failover, and enable_auto_failback requires enable_auto_recovery."
   }
 }
 

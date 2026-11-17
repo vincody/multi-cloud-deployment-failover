@@ -52,11 +52,11 @@ Ba URL cần cấu hình cho lần chạy mới:
 
 | Nhãn | URL probe | IP origin đã dùng ở GD5/GD6 |
 |---|---|---|
-| `aws-origin` | `https://aws-origin.YOUR_DOMAIN/health/live` | `AWS_PUBLIC_IP` |
-| `azure-origin` | `https://azure-origin.YOUR_DOMAIN/health/live` | `AZURE_PUBLIC_IP` |
+| `aws` | `https://aws.YOUR_DOMAIN/health/live` | `AWS_PUBLIC_IP` |
+| `azure` | `https://azure.YOUR_DOMAIN/health/live` | `AZURE_PUBLIC_IP` |
 | `shared-domain` | `https://app.YOUR_DOMAIN/health/live` | Route 53 chọn AWS hoặc Azure |
 
-**Quan trọng:** `aws-origin` và `azure-origin` là hostname riêng, không đi qua record failover `app`. Target `shared-domain` chỉ cho biết URL người dùng đang hoạt động; nó **không cho biết cloud nào đã trả lời**. Để xác định cloud, gọi `/version` và đọc `environment` như GD6/GD8.
+**Quan trọng:** `aws` và `azure` là hostname riêng, không đi qua record failover `app`. Target `shared-domain` chỉ cho biết URL người dùng đang hoạt động; nó **không cho biết cloud nào đã trả lời**. Để xác định cloud, gọi `/version` và đọc `environment` như GD6/GD8.
 
 ## Hướng dẫn thực hiện từ đầu đến cuối
 
@@ -86,7 +86,7 @@ notepad observability/prometheus.yml
 
 Trong `.env`, thay giá trị sau dấu `=` bằng mật khẩu riêng, lưu và đóng. Không thêm dấu nháy hoặc khoảng trắng ở hai đầu. File `.env` đã được `.gitignore`; không commit hoặc gửi lên chat. Nếu đã có `.env`, bỏ qua `Copy-Item` để tránh ghi đè mật khẩu.
 
-Trong `prometheus.yml`, tìm **ba dòng `targets` dưới job `blackbox_https`** và thay URL thành `https://aws-origin.YOUR_DOMAIN/health/live`, `https://azure-origin.YOUR_DOMAIN/health/live`, `https://app.YOUR_DOMAIN/health/live` sau khi thay `YOUR_DOMAIN` bằng domain thật. Làm tương tự với **hai dòng `targets` dưới job `blackbox_writer`**: `https://aws-origin.YOUR_DOMAIN/health/database` và `https://azure-origin.YOUR_DOMAIN/health/database`. Giữ nguyên label `target_name` tương ứng. Lưu file, đọc lại các URL để chắc chắn không còn hostname/IP của người triển khai khác. Chỉ sau bước này mới chạy `docker compose ... up -d` ở 7.3.
+Trong `prometheus.yml`, tìm **ba dòng `targets` dưới job `blackbox_https`** và thay URL thành `https://aws.YOUR_DOMAIN/health/live`, `https://azure.YOUR_DOMAIN/health/live`, `https://app.YOUR_DOMAIN/health/live` sau khi thay `YOUR_DOMAIN` bằng domain thật. Làm tương tự với **hai dòng `targets` dưới job `blackbox_writer`**: `https://aws.YOUR_DOMAIN/health/database` và `https://azure.YOUR_DOMAIN/health/database`. Giữ nguyên label `target_name` tương ứng. Lưu file, đọc lại các URL để chắc chắn không còn hostname/IP của người triển khai khác. Chỉ sau bước này mới chạy `docker compose ... up -d` ở 7.3.
 
 ### 7.3. LAPTOP — bật stack monitoring
 
@@ -149,10 +149,10 @@ docker compose --env-file observability/.env -f observability/compose.yaml logs 
 4. **LAPTOP / POWERSHELL:** chạy **từng lệnh**:
 
    ```powershell
-   Resolve-DnsName aws-origin.YOUR_DOMAIN -Type A -Server 1.1.1.1
-   Resolve-DnsName azure-origin.YOUR_DOMAIN -Type A -Server 1.1.1.1
-   curl.exe --fail-with-body https://aws-origin.YOUR_DOMAIN/health/live
-   curl.exe --fail-with-body https://azure-origin.YOUR_DOMAIN/health/live
+   Resolve-DnsName aws.YOUR_DOMAIN -Type A -Server 1.1.1.1
+   Resolve-DnsName azure.YOUR_DOMAIN -Type A -Server 1.1.1.1
+   curl.exe --fail-with-body https://aws.YOUR_DOMAIN/health/live
+   curl.exe --fail-with-body https://azure.YOUR_DOMAIN/health/live
    curl.exe --fail-with-body https://app.YOUR_DOMAIN/health/live
    curl.exe --fail-with-body https://app.YOUR_DOMAIN/version
    ```

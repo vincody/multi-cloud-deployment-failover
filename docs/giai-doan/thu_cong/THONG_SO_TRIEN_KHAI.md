@@ -25,7 +25,7 @@
 | DATABASE_URL | DSN DB của từng cluster | Secret riêng ngoài repo |
 | DB_STORAGE_PATH, DB_PVC_SIZE | Vị trí bền vững và dung lượng dự trù | Mỗi DB có storage riêng |
 | YOUR_DOMAIN | Domain nhóm sở hữu | Không dùng domain lượt cũ |
-| AWS_ORIGIN_HOST, AZURE_ORIGIN_HOST | aws-origin/azure-origin dưới domain thật | Kiểm tra từng origin |
+| AWS_ORIGIN_HOST, AZURE_ORIGIN_HOST | aws/azure dưới domain thật | Kiểm tra từng origin |
 | SHARED_HOST | app dưới domain thật | Origin trình duyệt giữ nguyên |
 | HOSTED_ZONE_ID, CERT_EMAIL | Zone/email TLS | Điền khi làm GĐ5 |
 | MONITOR_HOST | Laptop/máy thứ ba | Monitor độc lập hai VM |

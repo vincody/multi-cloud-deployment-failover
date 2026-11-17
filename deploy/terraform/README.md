@@ -191,8 +191,8 @@ Kiểm tra DNS bằng **PowerShell laptop**:
 ```powershell
 Resolve-DnsName $Domain -Type NS -Server 1.1.1.1
 Resolve-DnsName $Domain -Type NS -Server 8.8.8.8
-Resolve-DnsName "aws-origin.$Domain" -Type A -Server 1.1.1.1
-Resolve-DnsName "azure-origin.$Domain" -Type A -Server 1.1.1.1
+Resolve-DnsName "aws.$Domain" -Type A -Server 1.1.1.1
+Resolve-DnsName "azure.$Domain" -Type A -Server 1.1.1.1
 ```
 
 NS phải đúng bốn nameserver; A record phải đúng IP VM. Automation cũng kiểm tra NS/A qua cả hai resolver, dừng trước cấp certificate nếu DNS chưa sẵn sàng. Nếu domain có CAA hạn chế nhà cấp, cho phép Let's Encrypt. Record `app` chưa cần tồn tại vì cấp bằng DNS-01; TLS certificate vẫn chứa hostname chung.
@@ -243,7 +243,7 @@ terraform apply https.tfplan
 terraform output https_automation
 ```
 
-Script kiểm tra app/K3s trên cả hai VM, cài công cụ, kiểm tra DNS rồi tạm dừng hai renewal timer. Cấp certificate **AWS trước, Azure sau** vì cả hai certificate chứa `app.DOMAIN`. Certificate AWS gồm `app` + `aws-origin`; Azure gồm `app` + `azure-origin`. Retry giữ certificate còn hạn và không force-renew không cần thiết.
+Script kiểm tra app/K3s trên cả hai VM, cài công cụ, kiểm tra DNS rồi tạm dừng hai renewal timer. Cấp certificate **AWS trước, Azure sau** vì cả hai certificate chứa `app.DOMAIN`. Certificate AWS gồm `app` + `aws`; Azure gồm `app` + `azure`. Retry giữ certificate còn hạn và không force-renew không cần thiết.
 
 Sau cấp, script tạo TLS Secret, HTTPS Ingress `issues-https`, Middleware `https-redirect` và cập nhật `issues-http` thành redirect theo đúng hostname. Không tạo NGINX/Compose. Nếu UFW đang active, tự mở TCP 443; SG/NSG đã mở 443. Truy cập HTTP bằng IP có thể trả 404 sau HTTPS vì ingress đã dùng hostname; dùng URL origin/domain để kiểm tra.
 
@@ -252,12 +252,12 @@ Sau cấp, script tạo TLS Secret, HTTPS Ingress `issues-https`, Middleware `ht
 Trên **PowerShell laptop**:
 
 ```powershell
-curl.exe --fail-with-body "https://aws-origin.$Domain/version"
-curl.exe --fail-with-body "https://azure-origin.$Domain/version"
+curl.exe --fail-with-body "https://aws.$Domain/version"
+curl.exe --fail-with-body "https://azure.$Domain/version"
 curl.exe --fail-with-body --resolve "app.${Domain}:443:${AwsIp}" "https://app.$Domain/version"
 curl.exe --fail-with-body --resolve "app.${Domain}:443:${AzureIp}" "https://app.$Domain/version"
-curl.exe -I "http://aws-origin.$Domain/version"
-curl.exe -I "http://azure-origin.$Domain/version"
+curl.exe -I "http://aws.$Domain/version"
+curl.exe -I "http://azure.$Domain/version"
 ```
 
 Hai origin đúng environment/cùng commit. Hostname chung ép đến từng IP phải qua kiểm tra TLS thật; không `-k`. HTTP phải redirect HTTPS. Chỉ khi đã publish failover DNS ở mục 5 mới kiểm tra `app` bằng DNS thật.
@@ -341,15 +341,15 @@ terraform output auto_failover
 terraform output azure_watcher_iam_user
 ```
 
-Đọc plan trước apply; không replace VM/disk/PVC. Bước cài đặt kiểm tra Azure là standby streaming, copy watcher, chạy `--check` rồi bật dịch vụ `dcs29-watcher`. Watcher chỉ failover khi probe của Azure và Route 53 cùng báo AWS sập N lần liên tiếp, chờ EC2 `stopped` rồi mới promote Azure. Nếu không xác nhận được fencing, watcher dừng và thoát mã 2. Route 53 chọn writer sau readiness; async replication vẫn có thể mất WAL chưa truyền. Failback/rejoin không tự chạy.
+Đọc plan trước apply; không replace VM/disk/PVC. Bước cài đặt kiểm tra Azure là standby streaming, copy watcher, chạy `--check` rồi bật dịch vụ `dcs29-watcher`. Watcher chỉ failover khi probe của Azure và Route 53 cùng báo AWS sập N lần liên tiếp, chờ EC2 `stopped` rồi mới promote Azure. Nếu không xác nhận được fencing, watcher dừng và thoát mã 2. Route 53 chọn writer sau readiness; async replication vẫn có thể mất WAL chưa truyền. Mặc định failback/rejoin không tự chạy; `enable_auto_recovery` (rejoin sau khi bạn tự Start lại EC2) và `enable_auto_failback` (đưa writer về AWS) là hai cờ opt-in riêng, xem [mục 9 của hướng dẫn watcher](../../docs/giai-doan/tu_dong/AUTOMATION_FAILOVER.md#9-recovery-tự-động-rejoin-và-failback-sau-khi-bạn-bật-lại-ec2).
 
-Cơ chế và vận hành: [Failover tự động bằng watcher](../../docs/giai-doan/tu_dong/AUTOMATION_FAILOVER.md); diễn tập, bảo trì và rearm: **mục 9.2** của [hướng dẫn Terraform](../../docs/giai-doan/tu_dong/TRIEN_KHAI_BANG_TERRAFORM.md). `enable_auto_failover=false` gỡ IAM user và không dừng dịch vụ trên VM; tạm dừng bằng `/opt/dcs29/watcher.pause`. Chưa nghiệm thu trên cloud.
+Cơ chế và vận hành: [Failover tự động bằng watcher](../../docs/giai-doan/tu_dong/AUTOMATION_FAILOVER.md); diễn tập, bảo trì và rearm: **mục 8** của [hướng dẫn Terraform](../../docs/giai-doan/tu_dong/TRIEN_KHAI_BANG_TERRAFORM.md#8-lượt-5-tùy-chọn--failover-tự-động-aws--azure-watcher). `enable_auto_failover=false` gỡ IAM user và không dừng dịch vụ trên VM; tạm dừng bằng `/opt/dcs29/watcher.pause`. Chưa nghiệm thu trên cloud.
 
 ## Cập nhật image, dọn lab và lưu state
 
 - Với automation bật và AWS primary/Azure standby, đổi `image_digest` rồi plan/apply sẽ triển khai app mới trên cả hai cụm và kiểm chứng dữ liệu/commit; không tạo lại VM. Không dùng initial automation khi writer đã đổi sau failover. Nâng K3s hoặc migration schema cần quy trình riêng và sao lưu trước; chỉnh `k3s_version` không tự nâng VM đã tồn tại.
 - DNS không fence/promote database. Thực hiện [GĐ6](../../docs/giai-doan/thu_cong/GIAI_DOAN_06_ROUTE53_FAILOVER.md) đúng thứ tự: chặn ghi/drain, đợi WAL nếu planned, fence, promote, rồi kiểm tra writer health. Route 53 có thể trả endpoint khi cả hai unhealthy; không xem DNS là khóa bảo vệ một writer.
-- Nếu bật GĐ6B, tạo `watcher.pause` trước maintenance và `systemctl disable --now dcs29-watcher` trước destroy (mục 9.2 của hướng dẫn đầy đủ). Không Start writer AWS cũ.
+- Nếu bật GĐ6B, tạo `watcher.pause` trước maintenance và `systemctl disable --now dcs29-watcher` trước destroy (mục 8 của hướng dẫn đầy đủ). Không Start writer AWS cũ.
 - Trước destroy sao lưu dữ liệu PostgreSQL ra ngoài VM: PVC local-path trên OS disk không tồn tại sau xóa VM/disk.
 - Trước khi dọn, lưu kết quả GĐ8, xóa **access key tạo thủ công** của IAM user `dcs29-azure-certbot`; nếu còn key, AWS sẽ từ chối xóa user do Terraform quản lý. Đưa nameserver tại registrar về nơi bạn muốn dùng sau lab. Sau đó xem `terraform plan -destroy` và chạy `terraform destroy` trong đúng workspace/state. Terraform chỉ xóa tài nguyên trong state, không xóa domain đã đăng ký hoặc image GHCR. Nếu zone có record do bạn tạo thủ công ngoài Terraform, xử lý chúng trước khi destroy.
 - Stop VM không tương đương `destroy`: disk, static/public IP, Route 53 hosted zone và health checks vẫn có thể phát sinh phí. Giữ state an toàn cho lần `apply`/`destroy` tiếp theo.

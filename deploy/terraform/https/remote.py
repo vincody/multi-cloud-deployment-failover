@@ -21,7 +21,7 @@ def https_prepare(p):
         found = {v.lower().rstrip('.') for v in run(['dig', '+short', 'NS', p['domain'], '@' + resolver]).stdout.splitlines()}
         if found != expected:
             raise RuntimeError('Public DNS delegation is not ready; update registrar nameservers and wait before retrying')
-        origin = p['site'] + '-origin.' + p['domain']
+        origin = p['site'] + '.' + p['domain']
         if p['public_ip'] not in run(['dig', '+short', 'A', origin, '@' + resolver]).stdout.splitlines():
             raise RuntimeError('Origin DNS does not point to this VM')
     if p['site'] == 'azure':
@@ -47,7 +47,7 @@ def https_pause(p):
 
 
 def ingress(p):
-    hosts = [p['site'] + '-origin.' + p['domain'], 'app.' + p['domain']]
+    hosts = [p['site'] + '.' + p['domain'], 'app.' + p['domain']]
     rule = lambda host: {'host': host, 'http': {'paths': [{'path': '/', 'pathType': 'Prefix', 'backend': {'service': {'name': 'issues-app', 'port': {'number': 80}}}}]}}
     secure = {'apiVersion': 'networking.k8s.io/v1', 'kind': 'Ingress', 'metadata': {'name': 'issues-https', 'namespace': 'issues', 'annotations': {'traefik.ingress.kubernetes.io/router.entrypoints': 'websecure', 'traefik.ingress.kubernetes.io/router.tls': 'true'}}, 'spec': {'ingressClassName': 'traefik', 'tls': [{'hosts': hosts, 'secretName': 'issues-tls'}], 'rules': [rule(h) for h in hosts]}}
     redirect = {'apiVersion': 'traefik.io/v1alpha1', 'kind': 'Middleware', 'metadata': {'name': 'https-redirect', 'namespace': 'issues'}, 'spec': {'redirectScheme': {'scheme': 'https', 'permanent': True}}}
@@ -59,7 +59,7 @@ def https_apply(p):
     name = cert_name(p)
     folder = '/etc/letsencrypt/live/' + name
     # Certbot keeps a valid matching certificate instead of force-renewing on retry.
-    command = ['certbot', 'certonly', '--non-interactive', '--agree-tos', '--dns-route53', '--keep-until-expiring', '--cert-name', name, '--email', p['email'], '-d', 'app.' + p['domain'], '-d', p['site'] + '-origin.' + p['domain']]
+    command = ['certbot', 'certonly', '--non-interactive', '--agree-tos', '--dns-route53', '--keep-until-expiring', '--cert-name', name, '--email', p['email'], '-d', 'app.' + p['domain'], '-d', p['site'] + '.' + p['domain']]
     if p['site'] == 'azure':
         command = ['env', 'AWS_PROFILE=default', 'AWS_SHARED_CREDENTIALS_FILE=/root/.aws/credentials'] + command
     run(command, timeout=900)
@@ -86,7 +86,7 @@ test "${{RENEWED_LINEAGE:-}}" = "{folder}" || exit 0
 
 def https_verify(p):
     # VM-local routing, real SNI/hostname and public trust chain; never curl -k.
-    for hostname in (p['site'] + '-origin.' + p['domain'], 'app.' + p['domain']):
+    for hostname in (p['site'] + '.' + p['domain'], 'app.' + p['domain']):
         deadline = time.monotonic() + 120
         while True:
             result = run(['curl', '--silent', '--show-error', '--fail', '--noproxy', '*', '--resolve', hostname + ':443:127.0.0.1', 'https://' + hostname + '/version'], optional=True, timeout=15)

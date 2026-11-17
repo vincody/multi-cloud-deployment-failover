@@ -70,7 +70,7 @@ class Tests(unittest.TestCase):
     def test_ingress_uses_both_san_hosts_tls_and_host_specific_redirect(self):
         docs=remote['ingress']({'site':'azure','domain':'example.com'})['items']
         tls=docs[1]['spec']['tls'][0]
-        self.assertEqual(tls['hosts'],['azure-origin.example.com','app.example.com'])
+        self.assertEqual(tls['hosts'],['azure.example.com','app.example.com'])
         self.assertEqual(tls['secretName'],'issues-tls')
         self.assertTrue(docs[0]['spec']['redirectScheme']['permanent'])
         self.assertEqual(len(docs[2]['spec']['rules']),2)
