@@ -1,10 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="2400" height="1950" viewBox="0 0 2400 1950" role="img" aria-labelledby="title desc"><title id="title">DCS29 — AWS / Azure: kiến trúc và luồng hệ thống</title><desc id="desc">Hai cloud có bố cục đối xứng, mỗi cloud một VM chạy một cụm K3s độc lập. Pipeline triển khai ở trên. Luồng 1–4: DNS, HTTPS, ứng dụng và PostgreSQL, WAL qua WireGuard. Luồng 5–10, tùy chọn và mặc định tắt: watcher chạy trên VM Azure phát hiện lỗi bằng probe riêng và Route 53, xác nhận lần cuối, dừng EC2 (fence), promote Azure, kiểm tra writer rồi Route 53 chuyển DNS. Không tự failback.</desc><defs>
+<svg xmlns="http://www.w3.org/2000/svg" width="2400" height="2218" viewBox="0 0 2400 2218" role="img" aria-labelledby="title desc"><title id="title">DCS29 — AWS / Azure: kiến trúc và luồng hệ thống</title><desc id="desc">Hai cloud có bố cục đối xứng, mỗi cloud một VM chạy một cụm K3s độc lập. Pipeline triển khai ở trên. Luồng 1–4: DNS, HTTPS, ứng dụng và PostgreSQL, WAL qua WireGuard. Luồng 5–10, tùy chọn và mặc định tắt: watcher chạy trên VM Azure phát hiện lỗi bằng probe riêng và Route 53, xác nhận lần cuối, dừng EC2 (fence), promote Azure, kiểm tra writer rồi Route 53 chuyển DNS. Luồng 11–16, tùy chọn: sau khi người vận hành tự bật lại EC2, watcher rejoin AWS làm standby, khóa ghi Azure, fence database Azure, promote AWS rồi dựng lại Azure làm standby. Watcher không bao giờ tự Start EC2.</desc><defs>
 <marker id="a243447" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9" fill="#243447"/></marker>
 <marker id="a1768a6" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9" fill="#1768a6"/></marker>
 <marker id="a167647" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9" fill="#167647"/></marker>
 <marker id="a7040a4" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9" fill="#7040a4"/></marker>
 <marker id="a566579" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9" fill="#566579"/></marker>
-</defs><g font-family="Segoe UI,Arial,sans-serif"><rect width="2400" height="1950" fill="white"/>
+</defs><g font-family="Segoe UI,Arial,sans-serif"><rect width="2400" height="2218" fill="white"/>
 <text x="60" y="57" fill="#243447" font-size="35" font-weight="600" text-anchor="start">DCS29 / MULTI-CLOUD ISSUES &amp; DISASTER RECOVERY</text>
 <text x="60" y="98" fill="#566579" font-size="24" font-weight="400" text-anchor="start">AWS primary / Azure standby ban đầu · Hai cụm K3s độc lập · Một database writer tại một thời điểm</text>
 <rect x="60" y="140" width="2280" height="193" rx="8" fill="#fcfaff" stroke="#bbabd0" stroke-width="2"/>
@@ -229,16 +229,77 @@
 <text x="2021" y="1575" fill="#243447" font-size="20" font-weight="600" text-anchor="start">Writer &amp; DNS</text>
 <text x="1987" y="1609" fill="#566579" font-size="20" font-weight="400" text-anchor="start">/health/database → 200</text>
 <text x="1987" y="1639" fill="#566579" font-size="20" font-weight="400" text-anchor="start">Route 53 trả origin Azure</text>
-<rect x="60" y="1720" width="1060" height="142" rx="7" fill="#fbfcfd" stroke="#bac6cf" stroke-width="2"/>
-<image x="80" y="1736" width="40" height="40" href="data:image/svg+xml;base64,PHN2ZyBmaWxsPSIjRTY1MjJDIiByb2xlPSJpbWciIHZpZXdCb3g9IjAgMCAyNCAyNCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48dGl0bGU+UHJvbWV0aGV1czwvdGl0bGU+PHBhdGggZD0iTTEyIDBDNS4zNzMgMCAwIDUuMzcyIDAgMTJjMCA2LjYyNyA1LjM3MyAxMiAxMiAxMnMxMi01LjM3MyAxMi0xMmMwLTYuNjI4LTUuMzczLTEyLTEyLTEyem0wIDIyLjQ2Yy0xLjg4NSAwLTMuNDE0LTEuMjYtMy40MTQtMi44MTRoNi44MjhjMCAxLjU1My0xLjUyOCAyLjgxMy0zLjQxNCAyLjgxM3ptNS42NC0zLjc0NUg2LjM2di0yLjA0NmgxMS4yOHYyLjA0NnptLS4wNC0zLjA5OEg2LjM5MWMtLjAzNy0uMDQzLS4wNzUtLjA4Ni0uMTExLS4xMy0xLjE1NS0xLjQwMS0xLjQyNy0yLjEzMy0xLjY5LTIuODc5LS4wMDUtLjAyNSAxLjQuMjg3IDIuMzk1LjUxMSAwIDAgLjUxMy4xMTkgMS4yNjIuMjU1LS43Mi0uODQzLTEuMTQ3LTEuOTE1LTEuMTQ3LTMuMDEgMC0yLjQwNiAxLjg0NS00LjUwOCAxLjE4LTYuMjA3LjY0OC4wNTMgMS4zNCAxLjM2NyAxLjM4NyAzLjQyMi42ODktLjk1MS45NzctMi42OS45NzctMy43NTUgMC0xLjEwMy43MjctMi4zODUgMS40NTQtMi40MjktLjY0OCAxLjA2OS4xNjggMS45ODQuODk0IDQuMjU2LjI3Mi44NTQuMjM3IDIuMjkuNDQ3IDMuMjAxLjA3LTEuODkyLjM5NS00LjY1MiAxLjU5NS01LjYwNS0uNTI5IDEuMi4wNzkgMi43MDIuNDk0IDMuNDI0LjY3MSAxLjE2NCAxLjA3OCAyLjA0NyAxLjA3OCAzLjcxNmE0LjY0MiA0LjY0MiAwIDAxLTEuMTEgMi45OTZjLjc5Mi0uMTQ5IDEuMzQtLjI4MyAxLjM0LS4yODNsMi41NzMtLjUwMnMtLjM3NCAxLjUzOC0xLjgxIDMuMDE5eiIvPjwvc3ZnPg=="/>
-<text x="144" y="1759" fill="#243447" font-size="24" font-weight="600" text-anchor="start">OBSERVABILITY / máy giám sát độc lập</text>
-<text x="84" y="1799" fill="#566579" font-size="22" font-weight="400" text-anchor="start">Blackbox → Prometheus → Grafana · probe_failover.py đo RPO</text>
-<text x="84" y="1837" fill="#566579" font-size="20" font-weight="400" text-anchor="start">Probe /health/live và /health/database; dashboard DCS29 - Failover có sẵn.</text>
-<rect x="1280" y="1720" width="1060" height="142" rx="7" fill="#fbfcfd" stroke="#bac6cf" stroke-width="2"/>
-<image x="1300" y="1736" width="40" height="40" href="data:image/svg+xml;base64,PHN2ZyBmaWxsPSIjMjQ5NkVEIiByb2xlPSJpbWciIHZpZXdCb3g9IjAgMCAyNCAyNCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48dGl0bGU+RG9ja2VyPC90aXRsZT48cGF0aCBkPSJNMTMuOTgzIDExLjA3OGgyLjExOWEuMTg2LjE4NiAwIDAwLjE4Ni0uMTg1VjkuMDA2YS4xODYuMTg2IDAgMDAtLjE4Ni0uMTg2aC0yLjExOWEuMTg1LjE4NSAwIDAwLS4xODUuMTg1djEuODg4YzAgLjEwMi4wODMuMTg1LjE4NS4xODVtLTIuOTU0LTUuNDNoMi4xMThhLjE4Ni4xODYgMCAwMC4xODYtLjE4NlYzLjU3NGEuMTg2LjE4NiAwIDAwLS4xODYtLjE4NWgtMi4xMThhLjE4NS4xODUgMCAwMC0uMTg1LjE4NXYxLjg4OGMwIC4xMDIuMDgyLjE4NS4xODUuMTg1bTAgMi43MTZoMi4xMThhLjE4Ny4xODcgMCAwMC4xODYtLjE4NlY2LjI5YS4xODYuMTg2IDAgMDAtLjE4Ni0uMTg1aC0yLjExOGEuMTg1LjE4NSAwIDAwLS4xODUuMTg1djEuODg3YzAgLjEwMi4wODIuMTg1LjE4NS4xODZtLTIuOTMgMGgyLjEyYS4xODYuMTg2IDAgMDAuMTg0LS4xODZWNi4yOWEuMTg1LjE4NSAwIDAwLS4xODUtLjE4NUg4LjFhLjE4NS4xODUgMCAwMC0uMTg1LjE4NXYxLjg4N2MwIC4xMDIuMDgzLjE4NS4xODUuMTg2bS0yLjk2NCAwaDIuMTE5YS4xODYuMTg2IDAgMDAuMTg1LS4xODZWNi4yOWEuMTg1LjE4NSAwIDAwLS4xODUtLjE4NUg1LjEzNmEuMTg2LjE4NiAwIDAwLS4xODYuMTg1djEuODg3YzAgLjEwMi4wODQuMTg1LjE4Ni4xODZtNS44OTMgMi43MTVoMi4xMThhLjE4Ni4xODYgMCAwMC4xODYtLjE4NVY5LjAwNmEuMTg2LjE4NiAwIDAwLS4xODYtLjE4NmgtMi4xMThhLjE4NS4xODUgMCAwMC0uMTg1LjE4NXYxLjg4OGMwIC4xMDIuMDgyLjE4NS4xODUuMTg1bS0yLjkzIDBoMi4xMmEuMTg1LjE4NSAwIDAwLjE4NC0uMTg1VjkuMDA2YS4xODUuMTg1IDAgMDAtLjE4NC0uMTg2aC0yLjEyYS4xODUuMTg1IDAgMDAtLjE4NC4xODV2MS44ODhjMCAuMTAyLjA4My4xODUuMTg1LjE4NW0tMi45NjQgMGgyLjExOWEuMTg1LjE4NSAwIDAwLjE4NS0uMTg1VjkuMDA2YS4xODUuMTg1IDAgMDAtLjE4NC0uMTg2aC0yLjEyYS4xODYuMTg2IDAgMDAtLjE4Ni4xODZ2MS44ODdjMCAuMTAyLjA4NC4xODUuMTg2LjE4NW0tMi45MiAwaDIuMTJhLjE4NS4xODUgMCAwMC4xODQtLjE4NVY5LjAwNmEuMTg1LjE4NSAwIDAwLS4xODQtLjE4NmgtMi4xMmEuMTg1LjE4NSAwIDAwLS4xODQuMTg1djEuODg4YzAgLjEwMi4wODIuMTg1LjE4NS4xODVNMjMuNzYzIDkuODljLS4wNjUtLjA1MS0uNjcyLS41MS0xLjk1NC0uNTEtLjMzOC4wMDEtLjY3Ni4wMy0xLjAxLjA4Ny0uMjQ4LTEuNy0xLjY1My0yLjUzLTEuNzE2LTIuNTY2bC0uMzQ0LS4xOTktLjIyNi4zMjdjLS4yODQuNDM4LS40OS45MjItLjYxMiAxLjQzLS4yMy45Ny0uMDkgMS44ODIuNDAzIDIuNjYxLS41OTUuMzMyLTEuNTUuNDEzLTEuNzQ0LjQySC43NTFhLjc1MS43NTEgMCAwMC0uNzUuNzQ4IDExLjM3NiAxMS4zNzYgMCAwMC42OTIgNC4wNjJjLjU0NSAxLjQyOCAxLjM1NSAyLjQ4IDIuNDEgMy4xMjQgMS4xOC43MjMgMy4xIDEuMTM3IDUuMjc1IDEuMTM3Ljk4My4wMDMgMS45NjMtLjA4NiAyLjkzLS4yNjZhMTIuMjQ4IDEyLjI0OCAwIDAwMy44MjMtMS4zODljLjk4LS41NjcgMS44Ni0xLjI4OCAyLjYxLTIuMTM2IDEuMjUyLTEuNDE4IDEuOTk4LTIuOTk3IDIuNTUzLTQuNGguMjIxYzEuMzcyIDAgMi4yMTUtLjU0OSAyLjY4LTEuMDA5LjMwOS0uMjkzLjU1LS42NS43MDctMS4wNDZsLjA5OC0uMjg4WiIvPjwvc3ZnPg=="/>
-<text x="1364" y="1759" fill="#243447" font-size="24" font-weight="600" text-anchor="start">LOCAL DEMO / đã kiểm chứng</text>
-<text x="1304" y="1799" fill="#566579" font-size="22" font-weight="400" text-anchor="start">Browser :8090 → proxy → app AWS :8080 / Azure :8081 · watcher.py</text>
-<text x="1304" y="1837" fill="#566579" font-size="20" font-weight="400" text-anchor="start">PostgreSQL :55432 → WAL → :55433 · switchover · failover · failback</text>
-<text x="60" y="1903" fill="#243447" font-size="22" font-weight="600" text-anchor="start">Cloud: có Terraform / automation, chưa nghiệm thu · Replication bất đồng bộ: RPO có thể &gt; 0 · Failover tự động một chiều; rejoin / failback theo runbook.</text>
-<text x="60" y="1937" fill="#566579" font-size="21" font-weight="400" text-anchor="start">DNS không fencing hoặc promote database · App liveness: /health/live · Readiness: /api/database/status · Sau rejoin AWS, chiều WAL đảo lại.</text>
+<rect x="60" y="1706" width="2280" height="207" rx="8" fill="#fcfaff" stroke="#bca6d0" stroke-width="2"/>
+<text x="84" y="1744" fill="#7040a4" font-size="23" font-weight="600" text-anchor="start">LUỒNG 11–16: RECOVERY VÀ FAILBACK SAU KHI BẠN BẬT LẠI EC2 (WATCHER)</text>
+<text x="1900" y="1744" fill="#7040a4" font-size="21" font-weight="400" text-anchor="start">Tùy chọn · mặc định tắt · không tự Start EC2</text>
+<rect x="84" y="1768" width="346" height="117" rx="7" fill="white" stroke="#cabed8" stroke-width="2"/>
+<circle cx="110" cy="1797" r="17" fill="#7040a4"/>
+<text x="110" y="1804" fill="white" font-size="21" font-weight="600" text-anchor="middle">11</text>
+<text x="136" y="1805" fill="#243447" font-size="20" font-weight="600" text-anchor="start">Chờ bạn bật EC2</text>
+<text x="102" y="1839" fill="#566579" font-size="20" font-weight="400" text-anchor="start">Watcher không tự Start EC2</text>
+<text x="102" y="1869" fill="#566579" font-size="20" font-weight="400" text-anchor="start">Chờ EC2 running + RPC</text>
+<path d="M430 1827 H453" fill="none" stroke="#7040a4" stroke-width="3" stroke-linejoin="round" marker-end="url(#a7040a4)"/>
+<rect x="461" y="1768" width="346" height="117" rx="7" fill="white" stroke="#cabed8" stroke-width="2"/>
+<circle cx="487" cy="1797" r="17" fill="#7040a4"/>
+<text x="487" y="1804" fill="white" font-size="21" font-weight="600" text-anchor="middle">12</text>
+<text x="513" y="1805" fill="#243447" font-size="20" font-weight="600" text-anchor="start">Rejoin AWS</text>
+<text x="479" y="1839" fill="#566579" font-size="20" font-weight="400" text-anchor="start">PVC mới · pg_basebackup</text>
+<text x="479" y="1869" fill="#566579" font-size="20" font-weight="400" text-anchor="start">AWS thành standby của Azure</text>
+<path d="M807 1827 H830" fill="none" stroke="#7040a4" stroke-width="3" stroke-linejoin="round" marker-end="url(#a7040a4)"/>
+<rect x="838" y="1768" width="346" height="117" rx="7" fill="white" stroke="#cabed8" stroke-width="2"/>
+<circle cx="864" cy="1797" r="17" fill="#7040a4"/>
+<text x="864" y="1804" fill="white" font-size="21" font-weight="600" text-anchor="middle">13</text>
+<text x="890" y="1805" fill="#243447" font-size="20" font-weight="600" text-anchor="start">Khóa ghi Azure</text>
+<text x="856" y="1839" fill="#566579" font-size="20" font-weight="400" text-anchor="start">Chờ AWS replay LSN cuối</text>
+<text x="856" y="1869" fill="#566579" font-size="20" font-weight="400" text-anchor="start">Quá hạn: mở lại ghi</text>
+<path d="M1184 1827 H1207" fill="none" stroke="#7040a4" stroke-width="3" stroke-linejoin="round" marker-end="url(#a7040a4)"/>
+<rect x="1215" y="1768" width="346" height="117" rx="7" fill="white" stroke="#cabed8" stroke-width="2"/>
+<circle cx="1241" cy="1797" r="17" fill="#7040a4"/>
+<text x="1241" y="1804" fill="white" font-size="21" font-weight="600" text-anchor="middle">14</text>
+<text x="1267" y="1805" fill="#243447" font-size="20" font-weight="600" text-anchor="start">Fence Azure DB</text>
+<text x="1233" y="1839" fill="#566579" font-size="20" font-weight="400" text-anchor="start">Scale DB về 0, có bằng chứng</text>
+<text x="1233" y="1869" fill="#566579" font-size="20" font-weight="400" text-anchor="start">Không còn pod / cổng 5432</text>
+<path d="M1561 1827 H1584" fill="none" stroke="#7040a4" stroke-width="3" stroke-linejoin="round" marker-end="url(#a7040a4)"/>
+<rect x="1592" y="1768" width="346" height="117" rx="7" fill="white" stroke="#cabed8" stroke-width="2"/>
+<circle cx="1618" cy="1797" r="17" fill="#7040a4"/>
+<text x="1618" y="1804" fill="white" font-size="21" font-weight="600" text-anchor="middle">15</text>
+<text x="1644" y="1805" fill="#243447" font-size="20" font-weight="600" text-anchor="start">Promote AWS</text>
+<text x="1610" y="1839" fill="#566579" font-size="20" font-weight="400" text-anchor="start">pg_promote khi đủ LSN</text>
+<text x="1610" y="1869" fill="#566579" font-size="20" font-weight="400" text-anchor="start">Route 53 đổi DNS về AWS</text>
+<path d="M1938 1827 H1961" fill="none" stroke="#7040a4" stroke-width="3" stroke-linejoin="round" marker-end="url(#a7040a4)"/>
+<rect x="1969" y="1768" width="346" height="117" rx="7" fill="white" stroke="#cabed8" stroke-width="2"/>
+<circle cx="1995" cy="1797" r="17" fill="#7040a4"/>
+<text x="1995" y="1804" fill="white" font-size="21" font-weight="600" text-anchor="middle">16</text>
+<text x="2021" y="1805" fill="#243447" font-size="20" font-weight="600" text-anchor="start">Dựng lại Azure</text>
+<text x="1987" y="1839" fill="#566579" font-size="20" font-weight="400" text-anchor="start">Standby mới từ AWS</text>
+<text x="1987" y="1869" fill="#566579" font-size="20" font-weight="400" text-anchor="start">Rearm: quay lại theo dõi</text>
+<rect x="60" y="1950" width="2280" height="180" rx="7" fill="#fbfcfd" stroke="#bac6cf" stroke-width="2"/>
+<image x="80" y="1966" width="40" height="40" href="data:image/svg+xml;base64,PHN2ZyBmaWxsPSIjRTY1MjJDIiByb2xlPSJpbWciIHZpZXdCb3g9IjAgMCAyNCAyNCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48dGl0bGU+UHJvbWV0aGV1czwvdGl0bGU+PHBhdGggZD0iTTEyIDBDNS4zNzMgMCAwIDUuMzcyIDAgMTJjMCA2LjYyNyA1LjM3MyAxMiAxMiAxMnMxMi01LjM3MyAxMi0xMmMwLTYuNjI4LTUuMzczLTEyLTEyLTEyem0wIDIyLjQ2Yy0xLjg4NSAwLTMuNDE0LTEuMjYtMy40MTQtMi44MTRoNi44MjhjMCAxLjU1My0xLjUyOCAyLjgxMy0zLjQxNCAyLjgxM3ptNS42NC0zLjc0NUg2LjM2di0yLjA0NmgxMS4yOHYyLjA0NnptLS4wNC0zLjA5OEg2LjM5MWMtLjAzNy0uMDQzLS4wNzUtLjA4Ni0uMTExLS4xMy0xLjE1NS0xLjQwMS0xLjQyNy0yLjEzMy0xLjY5LTIuODc5LS4wMDUtLjAyNSAxLjQuMjg3IDIuMzk1LjUxMSAwIDAgLjUxMy4xMTkgMS4yNjIuMjU1LS43Mi0uODQzLTEuMTQ3LTEuOTE1LTEuMTQ3LTMuMDEgMC0yLjQwNiAxLjg0NS00LjUwOCAxLjE4LTYuMjA3LjY0OC4wNTMgMS4zNCAxLjM2NyAxLjM4NyAzLjQyMi42ODktLjk1MS45NzctMi42OS45NzctMy43NTUgMC0xLjEwMy43MjctMi4zODUgMS40NTQtMi40MjktLjY0OCAxLjA2OS4xNjggMS45ODQuODk0IDQuMjU2LjI3Mi44NTQuMjM3IDIuMjkuNDQ3IDMuMjAxLjA3LTEuODkyLjM5NS00LjY1MiAxLjU5NS01LjYwNS0uNTI5IDEuMi4wNzkgMi43MDIuNDk0IDMuNDI0LjY3MSAxLjE2NCAxLjA3OCAyLjA0NyAxLjA3OCAzLjcxNmE0LjY0MiA0LjY0MiAwIDAxLTEuMTEgMi45OTZjLjc5Mi0uMTQ5IDEuMzQtLjI4MyAxLjM0LS4yODNsMi41NzMtLjUwMnMtLjM3NCAxLjUzOC0xLjgxIDMuMDE5eiIvPjwvc3ZnPg=="/>
+<text x="144" y="1982" fill="#243447" font-size="24" font-weight="600" text-anchor="start">MONITORING / máy giám sát độc lập, nằm ngoài AWS và Azure</text>
+<text x="2316" y="1982" fill="#566579" font-size="21" font-weight="400" text-anchor="end">Docker Compose · chỉ mở trên 127.0.0.1</text>
+<rect x="84" y="2008" width="420" height="100" rx="7" fill="white" stroke="#cad2dc" stroke-width="2"/>
+<text x="102" y="2042" fill="#243447" font-size="21" font-weight="600" text-anchor="start">Endpoint được probe</text>
+<text x="102" y="2070" fill="#566579" font-size="20" font-weight="400" text-anchor="start">/health/live · /health/database</text>
+<text x="102" y="2096" fill="#566579" font-size="20" font-weight="400" text-anchor="start">AWS · Azure · app.&lt;domain&gt;</text>
+<path d="M504 2058 H529" fill="none" stroke="#566579" stroke-width="3" stroke-linejoin="round" marker-end="url(#a566579)"/>
+<rect x="537" y="2008" width="420" height="100" rx="7" fill="white" stroke="#cad2dc" stroke-width="2"/>
+<text x="555" y="2042" fill="#243447" font-size="21" font-weight="600" text-anchor="start">Probe độc lập</text>
+<text x="555" y="2070" fill="#566579" font-size="20" font-weight="400" text-anchor="start">Blackbox exporter :9115</text>
+<text x="555" y="2096" fill="#566579" font-size="20" font-weight="400" text-anchor="start">HTTPS từ ngoài hai cloud</text>
+<path d="M957 2058 H982" fill="none" stroke="#566579" stroke-width="3" stroke-linejoin="round" marker-end="url(#a566579)"/>
+<rect x="990" y="2008" width="420" height="100" rx="7" fill="white" stroke="#cad2dc" stroke-width="2"/>
+<text x="1008" y="2042" fill="#243447" font-size="21" font-weight="600" text-anchor="start">Thu thập</text>
+<text x="1008" y="2070" fill="#566579" font-size="20" font-weight="400" text-anchor="start">Prometheus :9090</text>
+<text x="1008" y="2096" fill="#566579" font-size="20" font-weight="400" text-anchor="start">Scrape mỗi 10 giây</text>
+<path d="M1410 2058 H1435" fill="none" stroke="#566579" stroke-width="3" stroke-linejoin="round" marker-end="url(#a566579)"/>
+<rect x="1443" y="2008" width="420" height="100" rx="7" fill="white" stroke="#cad2dc" stroke-width="2"/>
+<text x="1461" y="2042" fill="#243447" font-size="21" font-weight="600" text-anchor="start">Trực quan</text>
+<text x="1461" y="2070" fill="#566579" font-size="20" font-weight="400" text-anchor="start">Grafana :3000</text>
+<text x="1461" y="2096" fill="#566579" font-size="20" font-weight="400" text-anchor="start">Dashboard DCS29 - Failover</text>
+<rect x="1896" y="2008" width="420" height="100" rx="7" fill="white" stroke="#cad2dc" stroke-width="2"/>
+<text x="1914" y="2042" fill="#243447" font-size="21" font-weight="600" text-anchor="start">Đo thêm khi thử</text>
+<text x="1914" y="2070" fill="#566579" font-size="20" font-weight="400" text-anchor="start">probe_failover.py: RPO, ghi mất</text>
+<text x="1914" y="2096" fill="#566579" font-size="20" font-weight="400" text-anchor="start">journalctl -u dcs29-watcher</text>
+<text x="60" y="2171" fill="#243447" font-size="22" font-weight="600" text-anchor="start">Cloud: có Terraform / automation, chưa nghiệm thu · Replication bất đồng bộ: RPO có thể &gt; 0 · Failover tự động; rejoin / failback tự động nhưng tùy chọn, bắt đầu sau khi bạn bật lại EC2.</text>
+<text x="60" y="2205" fill="#566579" font-size="21" font-weight="400" text-anchor="start">DNS không fencing hoặc promote database · App liveness: /health/live · Readiness: /api/database/status · Sau rejoin AWS, chiều WAL đảo lại.</text>
 </g></svg>
